@@ -7,9 +7,8 @@ import yt_dlp
 from dotenv import load_dotenv
 from aiohttp import web
 
-from hydrogram import Client, filters
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from hydrogram.errors import FloodWait
+from telethon import TelegramClient, events, Button
+from telethon.errors import FloodWaitError
 
 from pytgcalls import PyTgCalls
 from pytgcalls import filters as tg_filters
@@ -34,14 +33,10 @@ for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     except Exception:
         pass
 
-app = Client(
-    "bot_session",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-)
+# Telethon bot client
+bot = TelegramClient("bot_session", API_ID, API_HASH)
 
-calls = PyTgCalls(app)
+calls = PyTgCalls(bot)
 
 queues: dict = {}
 now_playing: dict = {}
@@ -127,7 +122,7 @@ async def play_next(chat_id: int):
         except Exception:
             pass
         try:
-            await app.send_message(chat_id, "✅ Antrian habis.")
+            await bot.send_message(chat_id, "✅ Antrian habis.")
         except Exception:
             pass
         return
@@ -137,9 +132,12 @@ async def play_next(chat_id: int):
     safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
 
     try:
-        await app.send_message(
+        await bot.send_message(
             chat_id,
-            f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n👤 {track['uploader']}\n⏱ {fmt_duration(track['duration'])}\n🔗 {track['url']}",
+            f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n"
+            f"👤 {track['uploader']}\n"
+            f"⏱ {fmt_duration(track['duration'])}\n"
+            f"🔗 {track['url']}",
         )
     except Exception as e:
         print(f"send_message error: {e}")
@@ -154,7 +152,7 @@ async def play_next(chat_id: int):
     except Exception as e:
         print(f"play error: {e}")
         try:
-            await app.send_message(chat_id, f"❌ Error: {e}")
+            await bot.send_message(chat_id, f"❌ Error: {e}")
         except Exception:
             pass
         await play_next(chat_id)
@@ -165,66 +163,74 @@ async def on_stream_end(_, update: StreamEnded):
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
     await play_next(chat_id)
 
-@app.on_message(filters.command("start"))
-async def cmd_start(_, msg: Message):
-    print(f"✅ /start dari {msg.from_user.id if msg.from_user else '?'}")
-    await msg.reply_text(
+# ─── HANDLERS ────────────────────────────────────────────────────
+
+@bot.on(events.NewMessage(pattern=r"^/start"))
+async def cmd_start(event):
+    print(f"✅ /start dari {event.sender_id}")
+    await event.respond(
         "🎵 **Music Bot**\n\n"
         "Commands di grup dengan Voice Chat aktif:\n"
         "▶️ `/play <lagu>` — putar\n"
         "⏭ `/skip` — skip\n"
         "📋 `/queue` — antrian\n"
-        "⏹ `/stop` — stop\n\n"
+        "⏹ `/stop` — stop\n"
+        "🎧 `/nowplaying` — lagu sekarang\n\n"
         "Contoh: `/play despacito`"
     )
 
-@app.on_message(filters.command("play") & filters.group)
-async def cmd_play(_, msg: Message):
-    query = " ".join(msg.command[1:]).strip()
-    print(f"✅ /play '{query}' @ {msg.chat.id}")
+@bot.on(events.NewMessage(pattern=r"^/play(?:@\w+)?(?:\s+(.+))?$", func=lambda e: e.is_group))
+async def cmd_play(event):
+    query = event.pattern_match.group(1)
+    if query:
+        query = query.strip()
+    print(f"✅ /play '{query}' @ {event.chat_id}")
     if not query:
-        await msg.reply_text("❗ Contoh: `/play despacito`")
+        await event.respond("❗ Contoh: `/play despacito`")
         return
-    chat_id = msg.chat.id
-    status = await msg.reply_text(f"🔍 Mencari **{query}**...")
+    chat_id = event.chat_id
+    status = await event.respond(f"🔍 Mencari **{query}**...")
     try:
         info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
         print(f"✅ Found: {info['title']}")
     except Exception as e:
-        await status.edit_text(f"❌ Gagal: {e}")
+        await status.edit(f"❌ Gagal: {e}")
         return
     get_queue(chat_id).append(info)
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("⏭ Skip", callback_data=f"skip_{chat_id}"),
-        InlineKeyboardButton("📋 Queue", callback_data=f"queue_{chat_id}"),
-    ]])
-    await status.edit_text(
-        f"✅ **Ditambahkan!**\n\n🎵 **{info['title']}**\n👤 {info['uploader']}\n⏱ {fmt_duration(info['duration'])}",
-        reply_markup=kb,
+    buttons = [
+        [Button.inline("⏭ Skip", data=f"skip_{chat_id}"),
+         Button.inline("📋 Queue", data=f"queue_{chat_id}")]
+    ]
+    await status.edit(
+        f"✅ **Ditambahkan!**\n\n🎵 **{info['title']}**\n"
+        f"👤 {info['uploader']}\n"
+        f"⏱ {fmt_duration(info['duration'])}",
+        buttons=buttons,
     )
     if chat_id not in now_playing:
         await play_next(chat_id)
 
-@app.on_message(filters.command("skip") & filters.group)
-async def cmd_skip(_, msg: Message):
-    chat_id = msg.chat.id
+@bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
+async def cmd_skip(event):
+    chat_id = event.chat_id
+    print(f"✅ /skip @ {chat_id}")
     if chat_id not in now_playing:
-        await msg.reply_text("❗ Tidak ada lagu.")
+        await event.respond("❗ Tidak ada lagu.")
         return
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-    await msg.reply_text("⏭ Skip!")
+    await event.respond("⏭ Skip!")
     try:
         await calls.leave_call(chat_id)
     except Exception:
         pass
     await play_next(chat_id)
 
-@app.on_message(filters.command("queue") & filters.group)
-async def cmd_queue(_, msg: Message):
-    chat_id = msg.chat.id
+@bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
+async def cmd_queue(event):
+    chat_id = event.chat_id
     queue = get_queue(chat_id)
     if not queue and chat_id not in now_playing:
-        await msg.reply_text("📋 Antrian kosong.")
+        await event.respond("📋 Antrian kosong.")
         return
     text = "📋 **Antrian**\n\n"
     if chat_id in now_playing:
@@ -232,46 +238,51 @@ async def cmd_queue(_, msg: Message):
         text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
     for i, t in enumerate(queue, 1):
         text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
-    await msg.reply_text(text)
+    await event.respond(text)
 
-@app.on_message(filters.command("stop") & filters.group)
-async def cmd_stop(_, msg: Message):
-    chat_id = msg.chat.id
+@bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
+async def cmd_stop(event):
+    chat_id = event.chat_id
+    print(f"✅ /stop @ {chat_id}")
     queues[chat_id] = []
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
     try:
         await calls.leave_call(chat_id)
     except Exception:
         pass
-    await msg.reply_text("⏹ Stop.")
+    await event.respond("⏹ Stop.")
 
-@app.on_message(filters.command("nowplaying") & filters.group)
-async def cmd_nowplaying(_, msg: Message):
-    chat_id = msg.chat.id
+@bot.on(events.NewMessage(pattern=r"^/nowplaying(?:@\w+)?$", func=lambda e: e.is_group))
+async def cmd_nowplaying(event):
+    chat_id = event.chat_id
     if chat_id not in now_playing:
-        await msg.reply_text("❗ Tidak ada lagu.")
+        await event.respond("❗ Tidak ada lagu.")
         return
     np = now_playing[chat_id]
-    await msg.reply_text(
-        f"▶️ **Now Playing**\n\n🎵 **{np['title']}**\n👤 {np['uploader']}\n⏱ {fmt_duration(np['duration'])}\n🔗 {np.get('url', '-')}"
+    await event.respond(
+        f"▶️ **Now Playing**\n\n🎵 **{np['title']}**\n"
+        f"👤 {np['uploader']}\n"
+        f"⏱ {fmt_duration(np['duration'])}\n"
+        f"🔗 {np.get('url', '-')}"
     )
 
-@app.on_callback_query()
-async def cb_handler(_, cq: CallbackQuery):
-    data = cq.data
+@bot.on(events.CallbackQuery)
+async def cb_handler(event):
+    data = event.data.decode()
+    print(f"✅ Callback: {data}")
     if data.startswith("skip_"):
         chat_id = int(data.split("_")[1])
         if chat_id not in now_playing:
-            await cq.answer("Tidak ada lagu.", show_alert=True)
+            await event.answer("Tidak ada lagu.", alert=True)
             return
-        await cq.answer("⏭ Skip!")
+        await event.answer("⏭ Skip!")
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
         try:
             await calls.leave_call(chat_id)
         except Exception:
             pass
         try:
-            await cq.edit_message_text("⏭ Diskip!")
+            await event.edit("⏭ Diskip!")
         except Exception:
             pass
         await play_next(chat_id)
@@ -279,22 +290,21 @@ async def cb_handler(_, cq: CallbackQuery):
         chat_id = int(data.split("_")[1])
         queue = get_queue(chat_id)
         if not queue:
-            await cq.answer("Antrian kosong.", show_alert=True)
+            await event.answer("Antrian kosong.", alert=True)
         else:
             text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(queue))
-            await cq.answer(f"📋 Antrian:\n{text[:200]}", show_alert=True)
-    else:
-        await cq.answer()
+            await event.answer(f"📋 Antrian:\n{text[:200]}", alert=True)
 
-@app.on_message(group=999)
-async def catch_all(_, msg: Message):
-    print(f"📨 chat={msg.chat.id} type={msg.chat.type} text={msg.text!r}")
+# catch all debug
+@bot.on(events.NewMessage)
+async def catch_all(event):
+    print(f"📨 chat={event.chat_id} text={event.text!r}")
 
 
 async def main():
     print("🚀 Starting bot...")
 
-    # Delete webhook + drop pending
+    # Delete webhook
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
@@ -304,20 +314,10 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # Start hydrogram
-    for attempt in range(5):
-        try:
-            await app.start()
-            me = await app.get_me()
-            print(f"✅ Login @{me.username} (id={me.id})")
-            break
-        except FloodWait as e:
-            await asyncio.sleep(e.value + 5)
-        except Exception as e:
-            print(f"❌ start error: {e}")
-            raise
-    else:
-        raise Exception("Gagal login 5x")
+    # Start Telethon bot
+    await bot.start(bot_token=BOT_TOKEN)
+    me = await bot.get_me()
+    print(f"✅ Login @{me.username} (id={me.id})")
 
     # Start PyTgCalls
     try:
@@ -339,8 +339,7 @@ async def main():
     print(f"✅ Health check port {port}")
     print("✅ Bot ready!")
 
-    # Keep alive tanpa block dispatcher
-    await asyncio.Event().wait()
+    await bot.run_until_disconnected()
 
 
 if __name__ == "__main__":
