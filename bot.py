@@ -35,6 +35,7 @@ def search_and_get_info(query: str) -> dict:
         "quiet": True,
         "default_search": "ytsearch1",
         "cookiefile": COOKIES_FILE,
+        "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(query, download=False)
@@ -54,6 +55,7 @@ def download_audio(url: str, filename: str) -> str:
         "format": "bestaudio/best",
         "outtmpl": output_path + ".%(ext)s",
         "cookiefile": COOKIES_FILE,
+        "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -253,7 +255,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot jalan...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
