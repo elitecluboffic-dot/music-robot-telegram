@@ -131,7 +131,7 @@ def get_dynamic_free_proxy():
     print(f"⚠️ Proxy test semuanya lambat, pakai nekat: {fallback_pick}")
     return fallback_pick
 
-# ─── YT-DLP CONFIGURATIONS (TIMEOUT DIPERKETAT) ──────────────────
+# ─── YT-DLP CONFIGURATIONS (FIX FORMAT UNIVERSAL) ────────────────
 _JS_KEY  = None
 _JS_PATH = None
 
@@ -150,9 +150,10 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 12,  # 🔥 Diperketat ke 12s biar gak ngehang nungguin proxy lelet!
-        "format":         "bestaudio/best",  
+        "socket_timeout": 12,  
+        "format":         "bestaudio/best/best",  # 🔥 FIX FORMAT: Ambil apa aja yang ada biar gak error Requested format
         "noplaylist":      True,
+        "ignoreerrors":    True,
         "proxy":          get_dynamic_free_proxy(),  
         "extractor_args": {
             "youtube": {
@@ -197,9 +198,9 @@ def search_and_get_info(query: str) -> dict:
         "noplaylist":      True,
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
-        "socket_timeout": 12, # 🔥 Ketat biar gak ngehang pas nyari info lagu
+        "socket_timeout": 12, 
         "proxy":          get_dynamic_free_proxy(),  
-        "format":         "bestaudio/best",
+        "format":         "bestaudio/best/best",  # 🔥 FIX FORMAT JUGA DI SINI
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
@@ -316,7 +317,6 @@ async def play_next(chat_id: int):
     except Exception as e:
         print(f"send_message error: {e}")
 
-    # Coba download, kalau gagal karena proxy macet/timeout, loop panggil fungsi ini lagi buat otomatis cari proxy baru
     try:
         file_path = await asyncio.to_thread(
             download_audio, track["url"], f"{chat_id}_{safe}"
@@ -332,10 +332,9 @@ async def play_next(chat_id: int):
                 pass
     except Exception as e:
         print(f"❌ Play error (Otomatis ganti proxy baru): {e}")
-        # Kembalikan lagu ke antrian paling depan karena belum sukses diputar
         queue.insert(0, track)
         await asyncio.sleep(2)
-        await play_next(chat_id) # Pancing ulang loop biar dapet proxy baru yang segar
+        await play_next(chat_id) 
 
 
 async def on_stream_end_handler(client, update):
