@@ -27,16 +27,26 @@ def get_queue(chat_id):
         queues[chat_id] = []
     return queues[chat_id]
 
+# ─── YDL base opts ────────────────────────────────────────────────
+def get_ydl_opts(extra=None):
+    opts = {
+        "quiet": True,
+        "no_warnings": False,
+        "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
+        "socket_timeout": 30,
+        # Format yang tidak butuh JS runtime
+        "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio/best",
+        "noplaylist": True,
+    }
+    if extra:
+        opts.update(extra)
+    return opts
+
 # ─── Download audio ───────────────────────────────────────────────
 def search_and_get_info(query: str) -> dict:
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "noplaylist": True,
-        "quiet": True,
+    ydl_opts = get_ydl_opts({
         "default_search": "ytsearch1",
-        "cookiefile": COOKIES_FILE,
-        "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
-    }
+    })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(query, download=False)
         if "entries" in info:
@@ -51,18 +61,14 @@ def search_and_get_info(query: str) -> dict:
 
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
-    ydl_opts = {
-        "format": "bestaudio/best",
+    ydl_opts = get_ydl_opts({
         "outtmpl": output_path + ".%(ext)s",
-        "cookiefile": COOKIES_FILE,
-        "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
-            "preferredquality": "192",
+            "preferredquality": "128",
         }],
-        "quiet": True,
-    }
+    })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
     return output_path + ".mp3"
