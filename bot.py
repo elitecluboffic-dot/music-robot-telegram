@@ -1,6 +1,7 @@
 import os
 import asyncio
 import subprocess
+import aiohttp
 import yt_dlp
 from dotenv import load_dotenv
 from aiohttp import web
@@ -52,7 +53,7 @@ def get_queue(chat_id):
         queues[chat_id] = []
     return queues[chat_id]
 
-# ─── Cari JS runtime (FIXED: tidak lagi scan /nix/store) ─────────
+# ─── Cari JS runtime ─────────────────────────────────────────────
 def find_runtime():
     for binary in ["node", "deno", "bun"]:
         try:
@@ -68,8 +69,7 @@ def find_runtime():
     print("⚠️  JS Runtime tidak ditemukan. yt-dlp tetap berjalan tanpa JS runtime.")
     return None, None
 
-# ─── Panggil find_runtime di dalam fungsi, bukan di level modul ──
-_JS_RUNTIME_KEY = None
+_JS_RUNTIME_KEY  = None
 _JS_RUNTIME_PATH = None
 
 def _init_runtime():
@@ -377,6 +377,20 @@ async def callback_handler(_, cq):
 async def main():
     print("🚀 [5/5] Starting bot...")
 
+    # ─── HAPUS WEBHOOK dulu biar bot pakai polling, bukan webhook ──
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
+            async with session.get(url) as resp:
+                data = await resp.json()
+                if data.get("result"):
+                    print("✅ Webhook dihapus, beralih ke polling")
+                else:
+                    print(f"⚠️  deleteWebhook response: {data}")
+    except Exception as e:
+        print(f"⚠️  Gagal hapus webhook (lanjut): {e}")
+    # ───────────────────────────────────────────────────────────────
+
     try:
         await app.start()
         print("✅ Hydrogram client started")
@@ -391,7 +405,7 @@ async def main():
         print(f"❌ Gagal start PyTgCalls: {e}")
         raise
 
-    # Health check server biar Railway tidak kill container
+    # ─── Health check server biar Railway tidak kill container ─────
     async def health(request):
         return web.Response(text="OK")
 
