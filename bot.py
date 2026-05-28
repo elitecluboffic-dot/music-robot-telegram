@@ -129,7 +129,13 @@ def get_ydl_opts(extra=None):
 
 
 def search_and_get_info(query: str) -> dict:
-    with yt_dlp.YoutubeDL(get_ydl_opts({"default_search": "ytsearch1"})) as ydl:
+    # FIX: pakai format=None saat fetch info saja, biar tidak validasi format
+    info_opts = get_ydl_opts({
+        "default_search": "ytsearch1",
+        "format": None,          # jangan filter format saat cuma ambil metadata
+        "skip_download": True,
+    })
+    with yt_dlp.YoutubeDL(info_opts) as ydl:
         info = ydl.extract_info(query, download=False)
         if "entries" in info:
             info = info["entries"][0]
