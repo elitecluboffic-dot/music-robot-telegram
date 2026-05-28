@@ -1,5 +1,6 @@
 import os
 import asyncio
+import subprocess
 import yt_dlp
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -17,6 +18,56 @@ if not TOKEN:
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# ─── Cari deno path otomatis ──────────────────────────────────────
+def find_runtime():
+    paths = [
+        "/root/.deno/bin/deno",
+        "/usr/bin/deno",
+        "/usr/local/bin/deno",
+        "/nix/store",
+    ]
+    # Coba which deno dulu
+    try:
+        result = subprocess.run(["which", "deno"], capture_output=True, text=True)
+        if result.returncode == 0:
+            path = result.stdout.strip()
+            if path:
+                return f"deno:{path}"
+    except Exception:
+        pass
+
+    # Coba find di nix store
+    try:
+        result = subprocess.run(
+            ["find", "/nix/store", "-name", "deno", "-type", "f"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            path = result.stdout.strip().split("\n")[0]
+            return f"deno:{path}"
+    except Exception:
+        pass
+
+    # Coba hardcoded paths
+    for p in paths:
+        if os.path.exists(p) and os.path.isfile(p):
+            return f"deno:{p}"
+
+    # Coba nodejs
+    try:
+        result = subprocess.run(["which", "node"], capture_output=True, text=True)
+        if result.returncode == 0:
+            path = result.stdout.strip()
+            if path:
+                return f"nodejs:{path}"
+    except Exception:
+        pass
+
+    return None
+
+JS_RUNTIME = find_runtime()
+print(f"JS Runtime: {JS_RUNTIME or 'tidak ditemukan'}")
 
 # ─── Queue per chat ───────────────────────────────────────────────
 queues = {}
@@ -38,6 +89,8 @@ def get_ydl_opts(extra=None):
     }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
+    if JS_RUNTIME:
+        opts["js_runtimes"] = JS_RUNTIME
     if extra:
         opts.update(extra)
     return opts
