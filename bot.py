@@ -361,11 +361,13 @@ async def callback_handler(_, cq):
             await cq.answer(f"📋 Antrian:\n{text}", show_alert=True)
 
 # ─── Main ─────────────────────────────────────────────────────────
+from pytgcalls import idle
+
 async def main():
     await app.start()
     await calls.start()
     print("✅ Bot jalan dengan voice chat support!")
-    await asyncio.get_event_loop().run_forever()
+    await idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
