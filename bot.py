@@ -3,20 +3,21 @@ import asyncio
 import subprocess
 import yt_dlp
 from dotenv import load_dotenv
+from aiohttp import web
 
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from hydrogram.errors import UserAlreadyParticipant, ChatAdminRequired
 
-from pytgcalls import PyTgCalls
+from pytgcalls import PyTgCalls, idle
 from pytgcalls import filters as tg_filters
 from pytgcalls.types import MediaStream, StreamEnded
 from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 
 load_dotenv()
 
-API_ID   = int(os.getenv("API_ID", 0))
-API_HASH = os.getenv("API_HASH", "")
+API_ID    = int(os.getenv("API_ID", 0))
+API_HASH  = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
@@ -168,12 +169,7 @@ async def play_next(chat_id: int):
         file_path = await asyncio.get_event_loop().run_in_executor(
             None, download_audio, track["url"], filename
         )
-
-        await calls.play(
-            chat_id,
-            MediaStream(file_path),
-        )
-
+        await calls.play(chat_id, MediaStream(file_path))
         now_playing[chat_id]["file_path"] = file_path
 
     except Exception as e:
@@ -361,12 +357,24 @@ async def callback_handler(_, cq):
             await cq.answer(f"📋 Antrian:\n{text}", show_alert=True)
 
 # ─── Main ─────────────────────────────────────────────────────────
-from pytgcalls import idle
-
 async def main():
     await app.start()
     await calls.start()
     print("✅ Bot jalan dengan voice chat support!")
+
+    # Health check server biar Railway tidak kill container
+    async def health(request):
+        return web.Response(text="OK")
+
+    server = web.Application()
+    server.router.add_get("/", health)
+    runner = web.AppRunner(server)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"✅ Health check server jalan di port {port}")
+
     await idle()
 
 if __name__ == "__main__":
