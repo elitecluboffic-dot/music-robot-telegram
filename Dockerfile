@@ -1,15 +1,15 @@
 FROM python:3.10-slim
 
 RUN apt-get update && apt-get install -y \
-    ffmpeg nodejs npm \
+    ffmpeg nodejs npm git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --pre \
-    "pytgcalls==3.0.0.dev24" \
-    ntgcalls \
+    "ntgcalls==2.2.1b3" \
+    "git+https://github.com/pytgcalls/pytgcalls.git" \
     "pyrogram==2.0.106" \
     TgCrypto \
     yt-dlp \
