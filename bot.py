@@ -21,6 +21,7 @@ API_ID    = int(os.getenv("API_ID", 0))
 API_HASH  = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 USER_SESSION = os.getenv("USER_SESSION", "")  # dari gen_session.py
+PO_TOKEN    = os.getenv("PO_TOKEN", "")          # dari https://github.com/YunzheZJU/youtube-po-token-generator
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
@@ -113,6 +114,10 @@ def get_ydl_opts(extra=None):
 
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
+
+    if PO_TOKEN:
+        opts["extractor_args"]["youtube"]["po_token"] = [f"web+{PO_TOKEN}"]
+        opts["extractor_args"]["youtube"]["player_client"] = ["web"]
 
     if _JS_KEY:
         opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
