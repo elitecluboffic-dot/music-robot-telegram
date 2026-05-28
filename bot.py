@@ -92,17 +92,13 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":         "bestaudio/best",  # paling relaxed, ambil apapun yg ada
+        "format":         "ba/ba*",  # FIX: Fallback format yang adaptif jika format 'best' disembunyikan
         "noplaylist":     True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android", "mweb", "web"],
+                # FIX: Mengutamakan ios dan mweb yang paling stabil bypass restriksi streaming
+                "player_client": ["ios", "mweb", "android", "web"],
             }
-        },
-        "http_headers": {
-            "User-Agent": (
-                "com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip"
-            ),
         },
     }
 
@@ -143,10 +139,9 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":   False,
         "socket_timeout": 30,
-        # Jangan set "format" di sini — biar tidak trigger format check saat info
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android", "mweb", "web"],
+                "player_client": ["ios", "mweb", "android", "web"],
             }
         },
     }
@@ -161,7 +156,7 @@ def search_and_get_info(query: str) -> dict:
             raise Exception("Tidak ditemukan hasil apapun")
 
         if "entries" in info:
-            entries = list(info["entries"])  # flatten generator dulu!
+            entries = list(info["entries"])
             if not entries:
                 raise Exception("Hasil pencarian kosong")
             info = entries[0]
@@ -211,7 +206,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
-            "format":  "bestaudio/best",
+            "format":  "ba/ba*",
             "postprocessors": [{
                 "key":              "FFmpegExtractAudio",
                 "preferredcodec":   "mp3",
@@ -237,7 +232,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a2.%(ext)s",
-            "format":  "bestaudio/best",
+            "format":  "ba/ba*",
             "extractor_args": {
                 "youtube": {"player_client": ["ios"]}
             },
@@ -259,7 +254,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a3.%(ext)s",
-            "format":  "bestaudio/best",
+            "format":  "ba/ba*",
             "extractor_args": {
                 "youtube": {"player_client": ["web", "mweb"]}
             },
@@ -281,7 +276,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a4.%(ext)s",
-            "format":  "worstaudio/worst",
+            "format":  "ba/ba*",
             "extractor_args": {
                 "youtube": {"player_client": ["android", "ios", "web", "mweb"]}
             },
