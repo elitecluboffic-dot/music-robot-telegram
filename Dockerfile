@@ -6,20 +6,18 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install pyrofork dulu (fork pyrogram yg support GroupcallForbidden)
-# Lalu pytgcalls dev dari git
+# hydrogram + pytgcalls dev (keduanya harus kompatibel)
 RUN pip install --no-cache-dir \
-    "pyrofork==2.3.42" \
+    "hydrogram[fast]" \
     "TgCrypto" \
     "aiohttp" \
     "yt-dlp" \
     "python-dotenv" \
     && pip install --no-cache-dir --pre \
     "ntgcalls==2.2.1b3" \
-    "git+https://github.com/pytgcalls/pytgcalls.git"
+    "git+https://github.com/pytgcalls/pytgcalls.git@v2.2.12"
 
-# Verify
-RUN python -c "from pyrogram import Client, idle; print('Pyrogram OK')"
+RUN python -c "from hydrogram import Client; print('Hydrogram OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
 
 COPY . .
