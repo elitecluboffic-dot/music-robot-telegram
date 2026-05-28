@@ -1,5 +1,4 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
 
 [deploy]
-startCommand = "python -u bot.py"
