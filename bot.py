@@ -101,7 +101,7 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":          "ba/ba*",
+        "format":          "ba/ba*/best",  # FIX: Fallback ke format video jika audio murni tidak tersedia
         "noplaylist":      True,
         "extractor_args": {
             "youtube": {
@@ -211,7 +211,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
-            "format":  "ba/ba*",
+            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
             "postprocessors": [{
                 "key":              "FFmpegExtractAudio",
                 "preferredcodec":   "mp3",
@@ -236,7 +236,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a2.%(ext)s",
-            "format":  "ba/ba*",
+            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
             "extractor_args": {
                 "youtube": {"player_client": ["ios"]}
             },
@@ -257,7 +257,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a3.%(ext)s",
-            "format":  "ba/ba*",
+            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
             "extractor_args": {
                 "youtube": {"player_client": ["web", "mweb"]}
             },
@@ -278,7 +278,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a4.%(ext)s",
-            "format":  "ba/ba*",
+            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
             "extractor_args": {
                 "youtube": {"player_client": ["android", "ios", "web", "mweb"]}
             },
