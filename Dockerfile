@@ -6,16 +6,20 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Install pyrofork dulu (fork pyrogram yg support GroupcallForbidden)
+# Lalu pytgcalls dev dari git
 RUN pip install --no-cache-dir \
     "pyrofork==2.3.42" \
     "TgCrypto" \
+    "aiohttp" \
+    "yt-dlp" \
+    "python-dotenv" \
+    && pip install --no-cache-dir --pre \
     "ntgcalls==2.2.1b3" \
-    --pre "git+https://github.com/pytgcalls/pytgcalls.git" \
-    yt-dlp \
-    python-dotenv \
-    aiohttp
+    "git+https://github.com/pytgcalls/pytgcalls.git"
 
-RUN python -c "from pyrogram import Client; print('Pyrofork OK')"
+# Verify
+RUN python -c "from pyrogram import Client, idle; print('Pyrogram OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
 
 COPY . .
