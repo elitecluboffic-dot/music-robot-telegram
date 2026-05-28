@@ -4,9 +4,9 @@ import subprocess
 import yt_dlp
 from dotenv import load_dotenv
 
-from pyrofork import Client, filters
-from pyrofork.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrofork.errors import UserAlreadyParticipant, ChatAdminRequired
+from hydrogram import Client, filters
+from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from hydrogram.errors import UserAlreadyParticipant, ChatAdminRequired
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream
