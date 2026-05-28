@@ -151,7 +151,7 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 12,  
-        "format":         "bestaudio/best/best",  # 🔥 FIX FORMAT: Ambil apa aja yang ada biar gak error Requested format
+        "format":         "best/highest",  # 🔥 FIX FORMAT: Ambil apa aja yang ada biar gak error Requested format
         "noplaylist":      True,
         "ignoreerrors":    True,
         "proxy":          get_dynamic_free_proxy(),  
@@ -200,7 +200,7 @@ def search_and_get_info(query: str) -> dict:
         "ignoreerrors":    False,
         "socket_timeout": 12, 
         "proxy":          get_dynamic_free_proxy(),  
-        "format":         "bestaudio/best/best",  # 🔥 FIX FORMAT JUGA DI SINI
+        "format":         "best/highest",  # 🔥 FIX FORMAT JUGA DI SINI
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
