@@ -83,44 +83,65 @@ def cleanup_file(fp):
         except Exception:
             pass
 
-# ─── DYNAMIC PROXY SYSTEM (GEONODE WITH FALLBACK) ────────────────
+# ─── SMART DYNAMIC PROXY SYSTEM (VALIDASI AUTO RETRY) ────────────
 
 def get_dynamic_free_proxy():
-    """Mengambil proxy dinamis dari Geonode API dengan Fallback Auto-Scrape GitHub"""
+    """Mengambil proxy dinamis dari Geonode API dengan Fallback Auto-Scrape GitHub + Validasi Idup/Mati"""
     api_key = os.getenv("GEONODE_API_KEY")
+    proxy_pool = []
     
-    # Rencana A: Coba tembak Geonode API dulu
+    # ─── LANGKAH 1: KUMPULIN IP PROXY YANG ADA ───────────────────
+    # Coba dari Geonode dulu
     if api_key:
         try:
-            url = f"https://api.geonode.com/gproxi/v1/proxies?apiKey={api_key}&limit=1&protocols=http&anonymityLevel=elite"
-            response = requests.get(url, timeout=5)
+            url = f"https://api.geonode.com/gproxi/v1/proxies?apiKey={api_key}&limit=5&protocols=http&anonymityLevel=elite"
+            response = requests.get(url, timeout=4)
             if response.status_code == 200:
                 data = response.json()
-                if data.get("data") and len(data["data"]) > 0:
-                    p = data["data"][0]
-                    proxy_str = f"http://{p['ip']}:{p['port']}"
-                    print(f"📡 Geonode Proxy Terpasang: {proxy_str} ({p.get('country', 'Unknown')})")
-                    return proxy_str
+                if data.get("data"):
+                    for p in data["data"]:
+                        proxy_pool.append(f"http://{p['ip']}:{p['port']}")
         except Exception as e:
-            print(f"⚠️ Geonode API error/limit habis: {e}. Beralih ke Rencana B...")
-    else:
-        print("ℹ️ GEONODE_API_KEY kosong, langsung menggunakan Rencana B (Auto-Scrape GitHub)...")
+            print(f"⚠️ Geonode API error/timeout: {e}")
 
-    # Rencana B: Fallback Auto-Scrape List HTTP Gratisan dari GitHub (Anti-Limit)
-    try:
-        fallback_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
-        resp = requests.get(fallback_url, timeout=5)
-        if resp.status_code == 200:
-            proxies = resp.text.strip().split("\n")
-            if proxies:
-                random_proxy = random.choice(proxies).strip()
-                proxy_str = f"http://{random_proxy}"
-                print(f"📡 Fallback Auto-Scrape Proxy Aktif: {proxy_str}")
+    # Kalau Geonode dapet dikit atau gak dapet sama sekali, backup pake GitHub Scrape
+    if len(proxy_pool) < 3:
+        try:
+            fallback_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
+            resp = requests.get(fallback_url, timeout=4)
+            if resp.status_code == 200:
+                proxies = resp.text.strip().split("\n")
+                if proxies:
+                    # Ambil 15 acak buat kita filter/tes
+                    sampled = random.sample(proxies, min(15, len(proxies)))
+                    for p in sampled:
+                        proxy_pool.append(f"http://{p.strip()}")
+        except Exception as e:
+            print(f"❌ Gagal scrape proxy backup dari GitHub: {e}")
+
+    if not proxy_pool:
+        print("❌ Pool proxy kosong total! Gak ada IP yang bisa dipakai.")
+        return None
+
+    # ─── LANGKAH 2: TES PROXY SATU-SATU SAMPAI DAPET YANG IDUP ───
+    print(f"🔄 Memulai pengetesan dari {len(proxy_pool)} kandidat proxy...")
+    random.shuffle(proxy_pool) # Diacak biar gak rebutan IP sama orang lain
+    
+    for attempt, proxy_str in enumerate(proxy_pool[:6], 1): # Maksimal nyoba 6 proxy berbeda
+        try:
+            # Test proxy pake request ringan ke httpbin atau google buat mastiin gak 503/RTO
+            test_resp = requests.get("http://httpbin.org/ip", proxies={"http": proxy_str, "https": proxy_str}, timeout=3)
+            if test_resp.status_code == 200:
+                print(f"✅ Proxy Idup & Lolos Validasi pada percobaan ke-{attempt}: {proxy_str}")
                 return proxy_str
-    except Exception as e:
-        print(f"❌ Rencana B Gagal Total, gak bisa nyari proxy publik: {e}")
-        
-    return None
+        except Exception:
+            print(f"❌ Proxy mati/503 (Percobaan {attempt}/6): {proxy_str} -> Skip...")
+            continue
+
+    # Kalau terpaksa semuanya zonk, lempar aja 1 acak siapa tahu hoki di yt-dlp
+    fallback_pick = random.choice(proxy_pool)
+    print(f"⚠️ Semua proxy test zonk, terpaksa pakai IP nekat: {fallback_pick}")
+    return fallback_pick
 
 # ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
 _JS_KEY  = None
@@ -144,7 +165,7 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 30,
         "format":         "bestaudio/best",  
         "noplaylist":      True,
-        "proxy":          get_dynamic_free_proxy(),  # Inject proxy otomatis
+        "proxy":          get_dynamic_free_proxy(),  # Inject proxy terverifikasi
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
