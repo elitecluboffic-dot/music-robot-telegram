@@ -71,52 +71,6 @@ def cleanup_file(fp):
         except Exception:
             pass
 
-# ─── PO TOKEN ────────────────────────────────────────────────────
-
-def auto_generate_po_token():
-    """Generate PO Token via youtube-po-token-generator (Node.js) dengan memory limit."""
-    try:
-        r = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
-        if r.returncode != 0:
-            print("⚠️ Node.js tidak tersedia, skip PO Token")
-            return "", ""
-
-        # Cari path binary youtube-po-token-generator
-        which = subprocess.run(
-            ["which", "youtube-po-token-generator"],
-            capture_output=True, text=True, timeout=5
-        )
-        bin_path = which.stdout.strip()
-
-        if not bin_path:
-            print("⚠️ youtube-po-token-generator tidak ditemukan di PATH")
-            return "", ""
-
-        # Jalankan dengan memory limit 256MB untuk hindari OOM
-        result = subprocess.run(
-            ["node", "--max-old-space-size=512", bin_path],
-            capture_output=True, text=True, timeout=90
-        )
-
-        if result.returncode != 0:
-            print(f"⚠️ PO Token generator error: {result.stderr.strip()[:200]}")
-            return "", ""
-
-        data = json.loads(result.stdout.strip())
-        token   = data.get("poToken", "")
-        visitor = data.get("visitorData", "")
-
-        if token:
-            print(f"✅ PO Token: {token[:20]}...")
-        return token, visitor
-
-    except json.JSONDecodeError as e:
-        print(f"⚠️ Gagal parse JSON PO Token: {e}")
-        return "", ""
-    except Exception as e:
-        print(f"⚠️ Gagal generate PO Token: {e}")
-        return "", ""
-
 # ─── YT-DLP ──────────────────────────────────────────────────────
 
 _JS_KEY  = None
@@ -138,13 +92,11 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        # Format lebih fleksibel — tidak pakai format ID spesifik
         "format":         "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "format_sort":    ["abr", "asr"],
         "noplaylist":     True,
         "extractor_args": {
             "youtube": {
-                # Coba beberapa player client, android paling stabil untuk audio
                 "player_client": ["android", "ios", "mweb"],
             }
         },
@@ -168,7 +120,6 @@ def get_ydl_opts(extra=None):
         opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
 
     if extra:
-        # Merge extractor_args dengan benar (tidak overwrite)
         if "extractor_args" in extra:
             for k, v in extra.pop("extractor_args", {}).items():
                 if k in opts["extractor_args"]:
@@ -181,28 +132,45 @@ def get_ydl_opts(extra=None):
 
 
 def search_and_get_info(query: str) -> dict:
+    """
+    FIX: entries adalah generator di yt-dlp terbaru,
+    harus di-convert ke list dulu sebelum di-index.
+    """
     info_opts = get_ydl_opts({
         "default_search": "ytsearch1",
         "skip_download":  True,
     })
     with yt_dlp.YoutubeDL(info_opts) as ydl:
         info = ydl.extract_info(query, download=False)
+
+        if info is None:
+            raise Exception("Tidak ditemukan hasil apapun")
+
         if "entries" in info:
-            info = info["entries"][0]
+            entries = list(info["entries"])  # flatten generator dulu!
+            if not entries:
+                raise Exception("Hasil pencarian kosong")
+            info = entries[0]
+
         if not info:
-            raise Exception("Tidak ditemukan")
+            raise Exception("Info lagu tidak valid")
+
+        url = info.get("webpage_url") or info.get("url", "")
+        if not url:
+            raise Exception("URL lagu tidak ditemukan")
+
         return {
             "title":    info.get("title", "Unknown"),
-            "url":      info.get("webpage_url"),
+            "url":      url,
             "duration": info.get("duration", 0),
             "uploader": info.get("uploader", "Unknown"),
         }
 
 
-def _find_downloaded_file(base_path: str, suffixes: list[str]) -> str | None:
+def _find_downloaded_file(base_path: str, suffixes: list) -> str | None:
     """Cari file hasil download dengan berbagai kemungkinan ekstensi."""
-    for ext in ["mp3", "m4a", "webm", "opus", "ogg", "mp4", "aac"]:
-        for suffix in suffixes:
+    for suffix in suffixes:
+        for ext in ["mp3", "m4a", "webm", "opus", "ogg", "mp4", "aac"]:
             p = f"{base_path}{suffix}.{ext}"
             if os.path.exists(p):
                 return p
@@ -224,15 +192,15 @@ def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     mp3_path    = output_path + ".mp3"
 
-    # ── Attempt 1: android client (paling stabil) + langsung ke mp3 ──
+    # ── Attempt 1: android client + langsung ke mp3 ──
     print(f"⬇️ Attempt 1: android client...")
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
             "format":  "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
             "postprocessors": [{
-                "key":             "FFmpegExtractAudio",
-                "preferredcodec":  "mp3",
+                "key":              "FFmpegExtractAudio",
+                "preferredcodec":   "mp3",
                 "preferredquality": "128",
             }],
         })
@@ -243,7 +211,6 @@ def download_audio(url: str, filename: str) -> str:
             print("✅ Attempt 1 berhasil")
             return mp3_path
 
-        # mp3 belum ada — mungkin ffmpeg belum convert, cek ekstensi lain
         found = _find_downloaded_file(output_path, [""])
         if found:
             return _convert_to_mp3(found, mp3_path)
@@ -295,8 +262,8 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Attempt 3 gagal: {e}")
 
-    # ── Attempt 4: worst case — ambil apapun yang tersedia ──
-    print("🔄 Attempt 4: last resort - format any...")
+    # ── Attempt 4: last resort ──
+    print("🔄 Attempt 4: last resort...")
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a4.%(ext)s",
@@ -317,7 +284,7 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Attempt 4 gagal: {e}")
 
-    raise Exception("Semua metode download gagal. Cek cookies, update yt-dlp, atau aktifkan PO_TOKEN.")
+    raise Exception("Semua metode download gagal. Cek koneksi atau update yt-dlp.")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
@@ -557,20 +524,11 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # Auto-generate PO Token kalau tidak ada di env
-    if not PO_TOKEN:
-        print("🔄 Generating PO Token...")
-        po, vd = await asyncio.get_event_loop().run_in_executor(
-            None, auto_generate_po_token
-        )
-        if po:
-            PO_TOKEN     = po
-            VISITOR_DATA = vd
-            print("✅ PO Token siap!")
-        else:
-            print("⚠️ Lanjut tanpa PO Token")
-    else:
+    # Skip auto-generate PO Token (OOM di server RAM kecil)
+    if PO_TOKEN:
         print(f"✅ PO Token dari env: {PO_TOKEN[:20]}...")
+    else:
+        print("⚠️ PO_TOKEN tidak ada di env, lanjut tanpa PO Token")
 
     # Login userbot
     print("👤 Login userbot via StringSession...")
