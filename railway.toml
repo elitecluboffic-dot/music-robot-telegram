@@ -2,4 +2,4 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python bot.py"
+startCommand = "python -u bot.py"
