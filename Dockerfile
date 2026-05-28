@@ -6,15 +6,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir --pre \
+RUN pip install --no-cache-dir \
+    "pyrogram==2.0.106" \
+    "TgCrypto" \
     "ntgcalls==2.2.1b3" \
-    "git+https://github.com/pytgcalls/pytgcalls.git" \
-    "hydrogram" \
-    TgCrypto \
+    --pre "git+https://github.com/pytgcalls/pytgcalls.git" \
     yt-dlp \
     python-dotenv \
     aiohttp
 
+RUN python -c "from pyrogram import Client; print('Pyrogram OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
 
 COPY . .
