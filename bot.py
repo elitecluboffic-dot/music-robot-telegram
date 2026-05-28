@@ -236,7 +236,7 @@ async def play_next(chat_id: int):
 
 
 @calls.on_update(tg_filters.stream_end)
-async def on_stream_end(_, update: StreamEnded):
+async def on_stream_end(update: StreamEnded):
     chat_id = update.chat_id
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
     await play_next(chat_id)
