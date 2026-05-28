@@ -101,12 +101,13 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":         "ba/ba*/best",  # 🔥 FIX UTAMA: Fallback otomatis dari audio murni ke stream video lengkap
+        # 🔥 FIX TOTAL: Paksa cari format audio, kalau diblokir ambil format video paling ringan/worst (pasti ada stream-nya)
+        "format":         "ba/bestaudio/worstvideo+bestaudio/worst/best",
         "noplaylist":      True,
         "extractor_args": {
             "youtube": {
-                # 🔥 Penggabungan client agar yt-dlp melakukan rotasi bypass internal otomatis
                 "player_client": ["android", "ios", "mweb", "web"],
+                "skip": ["dash", "hls"],
             }
         },
         "postprocessors": [{
@@ -148,10 +149,11 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
-        "format":         "ba/ba*/best",  # 🔥 FIX UTAMA: Samakan format fleksibel agar pencarian tidak crash/kosong
+        # 🔥 FIX TOTAL: Disamakan agar pencarian info meta-data bypass batasan format
+        "format":         "ba/bestaudio/worstvideo+bestaudio/worst/best",
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb"],
+                "player_client": ["android", "ios", "mweb", "web"],
             }
         },
     }
@@ -205,7 +207,6 @@ def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     mp3_path    = output_path + ".mp3"
 
-    # Bersihkan file sampah sisa crash sebelumnya
     cleanup_file(mp3_path)
 
     print(f"⬇️ Memproses download via yt-dlp...")
@@ -217,13 +218,12 @@ def download_audio(url: str, filename: str) -> str:
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
-        # FFmpegExtractAudio pasca-proses otomatis menghasilkan .mp3 langsung jika sukses
         if os.path.exists(mp3_path):
             print("✅ Download & Konversi ke MP3 sukses.")
             return mp3_path
 
-        # Prosedur mitigasi penamaan file sisa temporary
-        for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
+        # Mitigasi kalau extractor menghasilkan format video lain (.mp4 / .webm) karena mode fallback worst tadi
+        for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac", "3gp", "flv"]:
             fp = f"{output_path}._tmp.{ext}"
             if os.path.exists(fp):
                 if ext == "mp3":
@@ -234,7 +234,7 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Proses download gagal: {e}")
 
-    raise Exception("Seluruh kombinasi stream audio diblokir YouTube. Silakan perbarui versi yt-dlp atau sediakan cookies.txt!")
+    raise Exception("YouTube memblokir IP ini secara total atau yt-dlp kamu kedaluwarsa di Railway!")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
