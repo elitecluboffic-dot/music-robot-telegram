@@ -17,11 +17,11 @@ from pytgcalls.types import MediaStream, StreamEnded
 
 load_dotenv()
 
-API_ID    = int(os.getenv("API_ID", 0))
-API_HASH  = os.getenv("API_HASH", "")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+API_ID       = int(os.getenv("API_ID", 0))
+API_HASH     = os.getenv("API_HASH", "")
+BOT_TOKEN    = os.getenv("BOT_TOKEN", "")
 USER_SESSION = os.getenv("USER_SESSION", "")  # dari gen_session.py
-PO_TOKEN    = os.getenv("PO_TOKEN", "")          # dari https://github.com/YunzheZJU/youtube-po-token-generator
+PO_TOKEN     = os.getenv("PO_TOKEN", "")      # dari https://github.com/YunzheZJU/youtube-po-token-generator
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
@@ -96,7 +96,8 @@ def get_ydl_opts(extra=None):
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[ext=mp4]/best",
+        # FIX: pakai "bestaudio/best" supaya fleksibel, tidak strict ke ext tertentu
+        "format": "bestaudio/best",
         "noplaylist": True,
         "extractor_args": {
             "youtube": {
@@ -147,45 +148,57 @@ def download_audio(url: str, filename: str) -> str:
 
     # Coba pertama: download + convert langsung ke mp3
     try:
-        with yt_dlp.YoutubeDL(get_ydl_opts({
+        opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
+            "format": "bestaudio/best",  # FIX: fleksibel
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": "128",
             }],
-        })) as ydl:
+        })
+        with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
-        mp3_path = output_path + ".mp3"
-        if os.path.exists(mp3_path):
-            return mp3_path
+        # FIX: cek berbagai kemungkinan ekstensi hasil download
+        for ext in ["mp3", "m4a", "webm", "opus", "ogg"]:
+            p = output_path + f".{ext}"
+            if os.path.exists(p):
+                return p
 
     except Exception as e:
         print(f"⚠️ Download pertama gagal: {e}")
 
     # Fallback: download format apapun yang tersedia, lalu convert manual
     print("🔄 Mencoba fallback download...")
-    fallback_opts = get_ydl_opts({
-        "outtmpl": output_path + "_raw.%(ext)s",
-        "format": "best[ext=mp4]/best",
-    })
-    with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        ext = info.get("ext", "mp4")
+    try:
+        fallback_opts = get_ydl_opts({
+            "outtmpl": output_path + "_raw.%(ext)s",
+            "format": "bestaudio/best",  # FIX: jangan strict ke mp4
+        })
+        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            ext = info.get("ext", "webm")
 
-    raw_path = output_path + f"_raw.{ext}"
-    mp3_path = output_path + ".mp3"
+        raw_path = output_path + f"_raw.{ext}"
+        mp3_path = output_path + ".mp3"
 
-    # Convert ke mp3 pakai ffmpeg
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_path,
-         "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", mp3_path],
-        check=True,
-        capture_output=True,
-    )
-    cleanup_file(raw_path)
-    return mp3_path
+        if not os.path.exists(raw_path):
+            raise FileNotFoundError(f"File tidak ditemukan: {raw_path}")
+
+        # Convert ke mp3 pakai ffmpeg
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_path,
+             "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", mp3_path],
+            check=True,
+            capture_output=True,
+        )
+        cleanup_file(raw_path)
+        return mp3_path
+
+    except Exception as e:
+        print(f"⚠️ Fallback download gagal: {e}")
+        raise Exception(f"Gagal download audio: {e}")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
