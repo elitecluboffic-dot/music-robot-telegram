@@ -32,11 +32,12 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet": True,
         "no_warnings": False,
-        "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         "socket_timeout": 30,
-        "format": "bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio",
+        "format": "bestaudio/best",
         "noplaylist": True,
     }
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
     if extra:
         opts.update(extra)
     return opts
@@ -92,7 +93,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/skip — skip lagu sekarang\n"
         "/clear — hapus antrian\n"
         "/nowplaying — info lagu sekarang\n\n"
-        "Di grup, gunakan /play untuk memutar lagu.",
+        "Di grup gunakan /play untuk memutar lagu.",
         parse_mode="Markdown"
     )
 
@@ -224,11 +225,10 @@ async def nowplaying_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# Handle pesan biasa — HANYA di DM, tidak di grup
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     if chat_type in ["group", "supergroup"]:
-        return  # abaikan semua pesan biasa di grup, harus pakai /play
+        return
     ctx.args = update.message.text.split()
     await play_command(update, ctx)
 
