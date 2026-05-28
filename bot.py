@@ -4,6 +4,8 @@ import json
 import asyncio
 import subprocess
 import aiohttp
+import requests
+import random
 import yt_dlp
 import base64
 import secrets
@@ -81,6 +83,45 @@ def cleanup_file(fp):
         except Exception:
             pass
 
+# ─── DYNAMIC PROXY SYSTEM (GEONODE WITH FALLBACK) ────────────────
+
+def get_dynamic_free_proxy():
+    """Mengambil proxy dinamis dari Geonode API dengan Fallback Auto-Scrape GitHub"""
+    api_key = os.getenv("GEONODE_API_KEY")
+    
+    # Rencana A: Coba tembak Geonode API dulu
+    if api_key:
+        try:
+            url = f"https://api.geonode.com/gproxi/v1/proxies?apiKey={api_key}&limit=1&protocols=http&anonymityLevel=elite"
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("data") and len(data["data"]) > 0:
+                    p = data["data"][0]
+                    proxy_str = f"http://{p['ip']}:{p['port']}"
+                    print(f"📡 Geonode Proxy Terpasang: {proxy_str} ({p.get('country', 'Unknown')})")
+                    return proxy_str
+        except Exception as e:
+            print(f"⚠️ Geonode API error/limit habis: {e}. Beralih ke Rencana B...")
+    else:
+        print("ℹ️ GEONODE_API_KEY kosong, langsung menggunakan Rencana B (Auto-Scrape GitHub)...")
+
+    # Rencana B: Fallback Auto-Scrape List HTTP Gratisan dari GitHub (Anti-Limit)
+    try:
+        fallback_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
+        resp = requests.get(fallback_url, timeout=5)
+        if resp.status_code == 200:
+            proxies = resp.text.strip().split("\n")
+            if proxies:
+                random_proxy = random.choice(proxies).strip()
+                proxy_str = f"http://{random_proxy}"
+                print(f"📡 Fallback Auto-Scrape Proxy Aktif: {proxy_str}")
+                return proxy_str
+    except Exception as e:
+        print(f"❌ Rencana B Gagal Total, gak bisa nyari proxy publik: {e}")
+        
+    return None
+
 # ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
 _JS_KEY  = None
 _JS_PATH = None
@@ -101,13 +142,12 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        # 🔥 FIX TOTAL: Paksa cari format audio, kalau diblokir ambil format video paling ringan/worst (pasti ada stream-nya)
-        "format":         "ba/bestaudio/worstvideo+bestaudio/worst/best",
+        "format":         "bestaudio/best",  # Balik ke format audio murni karena dibantu proxy
         "noplaylist":      True,
+        "proxy":          get_dynamic_free_proxy(),  # 🔥 Inject proxy dinamis
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
-                "skip": ["dash", "hls"],
             }
         },
         "postprocessors": [{
@@ -149,8 +189,8 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
-        # 🔥 FIX TOTAL: Disamakan agar pencarian info meta-data bypass batasan format
-        "format":         "ba/bestaudio/worstvideo+bestaudio/worst/best",
+        "proxy":          get_dynamic_free_proxy(),  # 🔥 Inject proxy dinamis pas searching info
+        "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
@@ -222,8 +262,7 @@ def download_audio(url: str, filename: str) -> str:
             print("✅ Download & Konversi ke MP3 sukses.")
             return mp3_path
 
-        # Mitigasi kalau extractor menghasilkan format video lain (.mp4 / .webm) karena mode fallback worst tadi
-        for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac", "3gp", "flv"]:
+        for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
             fp = f"{output_path}._tmp.{ext}"
             if os.path.exists(fp):
                 if ext == "mp3":
@@ -234,7 +273,7 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Proses download gagal: {e}")
 
-    raise Exception("YouTube memblokir IP ini secara total atau yt-dlp kamu kedaluwarsa di Railway!")
+    raise Exception("Proxy diblokir atau limit kuota habis! Jalur download YouTube gagal.")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
@@ -380,7 +419,7 @@ def register_handlers(tg_bot):
 
         text = "📋 **Antrian**\n\n"
         if chat_id in now_playing:
-            np    = now_playing[chat_id]
+            np = now_playing[chat_id]
             text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
         for i, t in enumerate(queue, 1):
             text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
