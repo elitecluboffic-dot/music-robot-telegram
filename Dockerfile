@@ -11,9 +11,13 @@ RUN pip install --no-cache-dir \
     "TgCrypto" \
     "aiohttp" \
     "yt-dlp" \
-    "python-dotenv" \
-    "ntgcalls==2.2.1b3" \
-    "pytgcalls==2.2.12"
+    "python-dotenv"
+
+RUN pip install --no-cache-dir --pre \
+    "ntgcalls==2.2.1b3"
+
+RUN pip install --no-cache-dir --pre \
+    "git+https://github.com/pytgcalls/pytgcalls.git"
 
 RUN python -c "from hydrogram import Client; print('Hydrogram OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
