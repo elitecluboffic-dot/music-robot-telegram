@@ -314,10 +314,22 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # Start Telethon bot
-    await bot.start(bot_token=BOT_TOKEN)
-    me = await bot.get_me()
-    print(f"✅ Login @{me.username} (id={me.id})")
+    # Start Telethon bot dengan FloodWait handling
+    for attempt in range(10):
+        try:
+            await bot.start(bot_token=BOT_TOKEN)
+            me = await bot.get_me()
+            print(f"✅ Login @{me.username} (id={me.id})")
+            break
+        except FloodWaitError as e:
+            wait = e.seconds + 5
+            print(f"⏳ FloodWait {wait}s... attempt {attempt+1}/10")
+            await asyncio.sleep(wait)
+        except Exception as e:
+            print(f"❌ Login error: {e}")
+            raise
+    else:
+        raise Exception("Gagal login 10x")
 
     # Start PyTgCalls
     try:
