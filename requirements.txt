@@ -1,11 +1,11 @@
-# Library Utama Telegram Client (Wajib ada untuk bot.py kamu)
+# Library Utama Telegram Client
 telethon
 TgCrypto
 
-# Library Voice Calls (Menggunakan backend PyAv)
-pytgcalls[pyav]
+# Library Voice Calls (Dioptimalkan untuk Cloud Deployment)
+pytgcalls
 
-# Library Download & Stream (Selalu gunakan versi paling segar)
+# Library Download & Stream (Selalu ambil versi paling segar untuk bypass YouTube)
 yt-dlp
 
 # Library Pendukung & HTTP Server
