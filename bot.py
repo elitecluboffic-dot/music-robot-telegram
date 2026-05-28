@@ -19,24 +19,37 @@ load_dotenv()
 API_ID    = int(os.getenv("API_ID", 0))
 API_HASH  = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+USER_PHONE = os.getenv("USER_PHONE", "")  # nomor HP userbot, contoh: +6281234567890
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
+
+if not USER_PHONE:
+    raise ValueError("USER_PHONE tidak ada! Isi nomor HP akun Telegram di env.")
 
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-for f in glob.glob("*.session") + glob.glob("*.session-journal"):
+# Hapus session bot lama, tapi JANGAN hapus user_session
+for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journal"):
     try:
         os.remove(f)
     except Exception:
         pass
 
-# Telethon bot client
+# ─── CLIENTS ─────────────────────────────────────────────────────
+
+# Bot client — hanya untuk terima/kirim pesan
 bot = TelegramClient("bot_session", API_ID, API_HASH)
 
-calls = PyTgCalls(bot)
+# Userbot client — yang masuk ke Voice Chat
+user = TelegramClient("user_session", API_ID, API_HASH)
+
+# PyTgCalls pakai userbot, bukan bot!
+calls = PyTgCalls(user)
+
+# ─── STATE ───────────────────────────────────────────────────────
 
 queues: dict = {}
 now_playing: dict = {}
@@ -60,6 +73,8 @@ def cleanup_file(fp):
         except Exception:
             pass
 
+# ─── YT-DLP ──────────────────────────────────────────────────────
+
 _JS_KEY = None
 _JS_PATH = None
 
@@ -74,21 +89,40 @@ def get_ydl_opts(extra=None):
                     break
             except Exception:
                 pass
+
     opts = {
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        "format": "bestaudio/best",
+        # ✅ Format fleksibel dengan fallback bertingkat
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[ext=mp4]/best",
         "noplaylist": True,
-        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
+        "extractor_args": {
+            "youtube": {
+                # ✅ ios lebih jarang diblock YouTube
+                "player_client": ["ios", "web", "tv_embedded", "android"],
+            }
+        },
+        # ✅ User-Agent biar keliatan kayak browser biasa
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        },
     }
+
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
+
     if _JS_KEY:
         opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
+
     if extra:
         opts.update(extra)
     return opts
+
 
 def search_and_get_info(query: str) -> dict:
     with yt_dlp.YoutubeDL(get_ydl_opts({"default_search": "ytsearch1"})) as ydl:
@@ -104,14 +138,54 @@ def search_and_get_info(query: str) -> dict:
             "uploader": info.get("uploader", "Unknown"),
         }
 
+
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
-    with yt_dlp.YoutubeDL(get_ydl_opts({
-        "outtmpl": output_path + ".%(ext)s",
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "128"}],
-    })) as ydl:
-        ydl.download([url])
-    return output_path + ".mp3"
+
+    # Coba pertama: download + convert langsung ke mp3
+    try:
+        with yt_dlp.YoutubeDL(get_ydl_opts({
+            "outtmpl": output_path + ".%(ext)s",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "128",
+            }],
+        })) as ydl:
+            ydl.download([url])
+
+        mp3_path = output_path + ".mp3"
+        if os.path.exists(mp3_path):
+            return mp3_path
+
+    except Exception as e:
+        print(f"⚠️ Download pertama gagal: {e}")
+
+    # Fallback: download format apapun yang tersedia, lalu convert manual
+    print("🔄 Mencoba fallback download...")
+    fallback_opts = get_ydl_opts({
+        "outtmpl": output_path + "_raw.%(ext)s",
+        "format": "best[ext=mp4]/best",
+    })
+    with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        ext = info.get("ext", "mp4")
+
+    raw_path = output_path + f"_raw.{ext}"
+    mp3_path = output_path + ".mp3"
+
+    # Convert ke mp3 pakai ffmpeg
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_path,
+         "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", mp3_path],
+        check=True,
+        capture_output=True,
+    )
+    cleanup_file(raw_path)
+    return mp3_path
+
+
+# ─── PLAY LOGIC ──────────────────────────────────────────────────
 
 async def play_next(chat_id: int):
     queue = get_queue(chat_id)
@@ -122,7 +196,7 @@ async def play_next(chat_id: int):
         except Exception:
             pass
         try:
-            await bot.send_message(chat_id, "✅ Antrian habis.")
+            await bot.send_message(chat_id, "✅ Antrian habis, userbot keluar dari Voice Chat.")
         except Exception:
             pass
         return
@@ -134,7 +208,8 @@ async def play_next(chat_id: int):
     try:
         await bot.send_message(
             chat_id,
-            f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n"
+            f"▶️ **Now Playing**\n\n"
+            f"🎵 **{track['title']}**\n"
             f"👤 {track['uploader']}\n"
             f"⏱ {fmt_duration(track['duration'])}\n"
             f"🔗 {track['url']}",
@@ -152,16 +227,18 @@ async def play_next(chat_id: int):
     except Exception as e:
         print(f"play error: {e}")
         try:
-            await bot.send_message(chat_id, f"❌ Error: {e}")
+            await bot.send_message(chat_id, f"❌ Error memutar lagu: {e}")
         except Exception:
             pass
         await play_next(chat_id)
+
 
 @calls.on_update(tg_filters.stream_end)
 async def on_stream_end(_, update: StreamEnded):
     chat_id = update.chat_id
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
     await play_next(chat_id)
+
 
 # ─── HANDLERS ────────────────────────────────────────────────────
 
@@ -171,13 +248,14 @@ async def cmd_start(event):
     await event.respond(
         "🎵 **Music Bot**\n\n"
         "Commands di grup dengan Voice Chat aktif:\n"
-        "▶️ `/play <lagu>` — putar\n"
-        "⏭ `/skip` — skip\n"
-        "📋 `/queue` — antrian\n"
-        "⏹ `/stop` — stop\n"
-        "🎧 `/nowplaying` — lagu sekarang\n\n"
+        "▶️ `/play <lagu>` — putar lagu\n"
+        "⏭ `/skip` — skip lagu\n"
+        "📋 `/queue` — lihat antrian\n"
+        "⏹ `/stop` — stop & kosongkan antrian\n"
+        "🎧 `/nowplaying` — lagu yang sedang diputar\n\n"
         "Contoh: `/play despacito`"
     )
+
 
 @bot.on(events.NewMessage(pattern=r"^/play(?:@\w+)?(?:\s+(.+))?$", func=lambda e: e.is_group))
 async def cmd_play(event):
@@ -185,91 +263,116 @@ async def cmd_play(event):
     if query:
         query = query.strip()
     print(f"✅ /play '{query}' @ {event.chat_id}")
+
     if not query:
         await event.respond("❗ Contoh: `/play despacito`")
         return
+
     chat_id = event.chat_id
     status = await event.respond(f"🔍 Mencari **{query}**...")
+
     try:
         info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
         print(f"✅ Found: {info['title']}")
     except Exception as e:
-        await status.edit(f"❌ Gagal: {e}")
+        await status.edit(f"❌ Gagal mencari: {e}")
         return
+
     get_queue(chat_id).append(info)
+
     buttons = [
         [Button.inline("⏭ Skip", data=f"skip_{chat_id}"),
          Button.inline("📋 Queue", data=f"queue_{chat_id}")]
     ]
     await status.edit(
-        f"✅ **Ditambahkan!**\n\n🎵 **{info['title']}**\n"
+        f"✅ **Ditambahkan ke antrian!**\n\n"
+        f"🎵 **{info['title']}**\n"
         f"👤 {info['uploader']}\n"
         f"⏱ {fmt_duration(info['duration'])}",
         buttons=buttons,
     )
+
     if chat_id not in now_playing:
         await play_next(chat_id)
+
 
 @bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
 async def cmd_skip(event):
     chat_id = event.chat_id
     print(f"✅ /skip @ {chat_id}")
+
     if chat_id not in now_playing:
-        await event.respond("❗ Tidak ada lagu.")
+        await event.respond("❗ Tidak ada lagu yang sedang diputar.")
         return
+
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-    await event.respond("⏭ Skip!")
+    await event.respond("⏭ Di-skip!")
+
     try:
         await calls.leave_call(chat_id)
     except Exception:
         pass
+
     await play_next(chat_id)
+
 
 @bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
 async def cmd_queue(event):
     chat_id = event.chat_id
     queue = get_queue(chat_id)
+
     if not queue and chat_id not in now_playing:
         await event.respond("📋 Antrian kosong.")
         return
+
     text = "📋 **Antrian**\n\n"
     if chat_id in now_playing:
         np = now_playing[chat_id]
         text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
     for i, t in enumerate(queue, 1):
         text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
+
     await event.respond(text)
+
 
 @bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
 async def cmd_stop(event):
     chat_id = event.chat_id
     print(f"✅ /stop @ {chat_id}")
+
     queues[chat_id] = []
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
+
     try:
         await calls.leave_call(chat_id)
     except Exception:
         pass
-    await event.respond("⏹ Stop.")
+
+    await event.respond("⏹ Stop. Antrian dikosongkan.")
+
 
 @bot.on(events.NewMessage(pattern=r"^/nowplaying(?:@\w+)?$", func=lambda e: e.is_group))
 async def cmd_nowplaying(event):
     chat_id = event.chat_id
     if chat_id not in now_playing:
-        await event.respond("❗ Tidak ada lagu.")
+        await event.respond("❗ Tidak ada lagu yang sedang diputar.")
         return
+
     np = now_playing[chat_id]
     await event.respond(
-        f"▶️ **Now Playing**\n\n🎵 **{np['title']}**\n"
+        f"▶️ **Now Playing**\n\n"
+        f"🎵 **{np['title']}**\n"
         f"👤 {np['uploader']}\n"
         f"⏱ {fmt_duration(np['duration'])}\n"
         f"🔗 {np.get('url', '-')}"
     )
 
+
 @bot.on(events.CallbackQuery)
 async def cb_handler(event):
     data = event.data.decode()
     print(f"✅ Callback: {data}")
+
     if data.startswith("skip_"):
         chat_id = int(data.split("_")[1])
         if chat_id not in now_playing:
@@ -282,10 +385,11 @@ async def cb_handler(event):
         except Exception:
             pass
         try:
-            await event.edit("⏭ Diskip!")
+            await event.edit("⏭ Di-skip!")
         except Exception:
             pass
         await play_next(chat_id)
+
     elif data.startswith("queue_"):
         chat_id = int(data.split("_")[1])
         queue = get_queue(chat_id)
@@ -295,11 +399,14 @@ async def cb_handler(event):
             text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(queue))
             await event.answer(f"📋 Antrian:\n{text[:200]}", alert=True)
 
-# catch all debug
+
+# Debug: tangkap semua pesan
 @bot.on(events.NewMessage)
 async def catch_all(event):
     print(f"📨 chat={event.chat_id} text={event.text!r}")
 
+
+# ─── MAIN ────────────────────────────────────────────────────────
 
 async def main():
     print("🚀 Starting bot...")
@@ -314,34 +421,45 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # Start Telethon bot dengan FloodWait handling
+    # Login userbot (akun biasa untuk Voice Chat)
+    print(f"👤 Login userbot {USER_PHONE}...")
+    try:
+        await user.start(phone=USER_PHONE)
+        me = await user.get_me()
+        print(f"✅ Userbot login: @{me.username or me.first_name} (id={me.id})")
+    except Exception as e:
+        print(f"❌ Userbot login error: {e}")
+        raise
+
+    # Login bot (untuk terima/kirim pesan)
     for attempt in range(10):
         try:
             await bot.start(bot_token=BOT_TOKEN)
             me = await bot.get_me()
-            print(f"✅ Login @{me.username} (id={me.id})")
+            print(f"✅ Bot login: @{me.username} (id={me.id})")
             break
         except FloodWaitError as e:
             wait = e.seconds + 5
             print(f"⏳ FloodWait {wait}s... attempt {attempt+1}/10")
             await asyncio.sleep(wait)
         except Exception as e:
-            print(f"❌ Login error: {e}")
+            print(f"❌ Bot login error: {e}")
             raise
     else:
-        raise Exception("Gagal login 10x")
+        raise Exception("Gagal login bot 10x")
 
-    # Start PyTgCalls
+    # Start PyTgCalls (pakai userbot)
     try:
         await calls.start()
-        print("✅ PyTgCalls started")
+        print("✅ PyTgCalls started (userbot)")
     except Exception as e:
         print(f"❌ PyTgCalls error: {e}")
         raise
 
-    # Health check
+    # Health check server
     async def health(request):
         return web.Response(text="OK")
+
     server = web.Application()
     server.router.add_get("/", health)
     runner = web.AppRunner(server)
@@ -349,7 +467,7 @@ async def main():
     port = int(os.getenv("PORT", 8080))
     await web.TCPSite(runner, "0.0.0.0", port).start()
     print(f"✅ Health check port {port}")
-    print("✅ Bot ready!")
+    print("✅ Bot siap!")
 
     await bot.run_until_disconnected()
 
