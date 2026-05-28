@@ -46,21 +46,19 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Hapus session bot lama
+# Hapus session bot lama sebelum startup
 for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journal"):
     try:
         os.remove(f)
     except Exception:
         pass
 
-# ─── CLIENTS ─────────────────────────────────────────────────────
-
-bot   = TelegramClient("bot_session", API_ID, API_HASH)
-user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
-calls = PyTgCalls(user)
+# ─── GLOBAL CLIENTS (DI-INISIALISASI DI DALAM MAIN) ───────────────
+bot   = None
+user  = None
+calls = None
 
 # ─── STATE ───────────────────────────────────────────────────────
-
 queues: dict      = {}
 now_playing: dict = {}
 
@@ -84,7 +82,6 @@ def cleanup_file(fp):
             pass
 
 # ─── YT-DLP ──────────────────────────────────────────────────────
-
 _JS_KEY  = None
 _JS_PATH = None
 
@@ -334,14 +331,12 @@ async def play_next(chat_id: int):
         print(f"send_message error: {e}")
 
     try:
-        # FIX AMAN: Mengunci pengerjaan pada loop aktif agar tidak memicu thread pool mismatch
-        loop = asyncio.get_running_loop()
-        
-        file_path = await loop.run_in_executor(
-            None, download_audio, track["url"], f"{chat_id}_{safe}"
+        # FIX LOOP AMAN: Menggunakan asyncio.to_thread bawaan Python 3.10+ agar tetap di satu event loop utama
+        file_path = await asyncio.to_thread(
+            download_audio, track["url"], f"{chat_id}_{safe}"
         )
         
-        # Pengecekan krusial sebelum melempar stream data ke voice channel
+        # Eksekusi stream musik ke VC lewat core loop yang sama
         await calls.play(chat_id, MediaStream(file_path))
         
         now_playing[chat_id]["file_path"] = file_path
@@ -355,8 +350,8 @@ async def play_next(chat_id: int):
         await play_next(chat_id)
 
 
-@calls.on_update()
-async def on_stream_end(client, update):
+# Mendaftarkan callback untuk menangani track selesai
+async def on_stream_end_handler(client, update):
     if not isinstance(update, StreamEnded):
         return
     chat_id = update.chat_id
@@ -364,177 +359,171 @@ async def on_stream_end(client, update):
     await play_next(chat_id)
 
 
-# ─── HANDLERS ────────────────────────────────────────────────────
+# ─── REGISTER HANDLERS SYSTEM ───────────────────────────────────
 
-@bot.on(events.NewMessage(pattern=r"^/start"))
-async def cmd_start(event):
-    print(f"✅ /start dari {event.sender_id}")
-    await event.respond(
-        "🎵 **Music Bot**\n\n"
-        "Commands di grup dengan Voice Chat aktif:\n"
-        "▶️ `/play <lagu>` — putar lagu\n"
-        "⏭ `/skip` — skip lagu\n"
-        "📋 `/queue` — lihat antrian\n"
-        "⏹ `/stop` — stop & kosongkan antrian\n"
-        "🎧 `/nowplaying` — lagu yang sedang diputar\n\n"
-        "Contoh: `/play despacito`"
-    )
+def register_handlers(tg_bot):
+    @tg_bot.on(events.NewMessage(pattern=r"^/start"))
+    async def cmd_start(event):
+        print(f"✅ /start dari {event.sender_id}")
+        await event.respond(
+            "🎵 **Music Bot**\n\n"
+            "Commands di grup dengan Voice Chat aktif:\n"
+            "▶️ `/play <lagu>` — putar lagu\n"
+            "⏭ `/skip` — skip lagu\n"
+            "📋 `/queue` — lihat antrian\n"
+            "⏹ `/stop` — stop & kosongkan antrian\n"
+            "🎧 `/nowplaying` — lagu yang sedang diputar\n\n"
+            "Contoh: `/play despacito`"
+        )
 
+    @tg_bot.on(events.NewMessage(pattern=r"^/play(?:@\w+)?(?:\s+(.+))?$", func=lambda e: e.is_group))
+    async def cmd_play(event):
+        query = event.pattern_match.group(1)
+        if query:
+            query = query.strip()
+        print(f"✅ /play '{query}' @ {event.chat_id}")
 
-@bot.on(events.NewMessage(pattern=r"^/play(?:@\w+)?(?:\s+(.+))?$", func=lambda e: e.is_group))
-async def cmd_play(event):
-    query = event.pattern_match.group(1)
-    if query:
-        query = query.strip()
-    print(f"✅ /play '{query}' @ {event.chat_id}")
-
-    if not query:
-        await event.respond("❗ Contoh: `/play despacito`")
-        return
-
-    chat_id = event.chat_id
-    status  = await event.respond(f"🔍 Mencari **{query}**...")
-
-    try:
-        info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
-        print(f"✅ Found: {info['title']}")
-    except Exception as e:
-        await status.edit(f"❌ Gagal mencari: {e}")
-        return
-
-    get_queue(chat_id).append(info)
-
-    buttons = [
-        [Button.inline("⏭ Skip", data=f"skip_{chat_id}"),
-         Button.inline("📋 Queue", data=f"queue_{chat_id}")]
-    ]
-    await status.edit(
-        f"✅ **Ditambahkan ke antrian!**\n\n"
-        f"🎵 **{info['title']}**\n"
-        f"👤 {info['uploader']}\n"
-        f"⏱ {fmt_duration(info['duration'])}",
-        buttons=buttons,
-    )
-
-    if chat_id not in now_playing:
-        await play_next(chat_id)
-
-
-@bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
-async def cmd_skip(event):
-    chat_id = event.chat_id
-    print(f"✅ /skip @ {chat_id}")
-
-    if chat_id not in now_playing:
-        await event.respond("❗ Tidak ada lagu yang sedang diputar.")
-        return
-
-    cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-    await event.respond("⏭ Di-skip!")
-
-    try:
-        await calls.leave_call(chat_id)
-    except Exception:
-        pass
-
-    await play_next(chat_id)
-
-
-@bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
-async def cmd_queue(event):
-    chat_id = event.chat_id
-    queue   = get_queue(chat_id)
-
-    if not queue and chat_id not in now_playing:
-        await event.respond("📋 Antrian kosong.")
-        return
-
-    text = "📋 **Antrian**\n\n"
-    if chat_id in now_playing:
-        np    = now_playing[chat_id]
-        text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
-    for i, t in enumerate(queue, 1):
-        text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
-
-    await event.respond(text)
-
-
-@bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
-async def cmd_stop(event):
-    chat_id         = event.chat_id
-    queues[chat_id] = []
-    cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-
-    try:
-        await calls.leave_call(chat_id)
-    except Exception:
-        pass
-
-    await event.respond("⏹ Stop. Antrian dikosongkan.")
-
-
-@bot.on(events.NewMessage(pattern=r"^/nowplaying(?:@\w+)?$", func=lambda e: e.is_group))
-async def cmd_nowplaying(event):
-    chat_id = event.chat_id
-    if chat_id not in now_playing:
-        await event.respond("❗ Tidak ada lagu yang sedang diputar.")
-        return
-
-    np = now_playing[chat_id]
-    await event.respond(
-        f"▶️ **Now Playing**\n\n"
-        f"🎵 **{np['title']}**\n"
-        f"👤 {np['uploader']}\n"
-        f"⏱ {fmt_duration(np['duration'])}\n"
-        f"🔗 {np.get('url', '-')}"
-    )
-
-
-@bot.on(events.CallbackQuery)
-async def cb_handler(event):
-    data = event.data.decode()
-    print(f"✅ Callback: {data}")
-
-    if data.startswith("skip_"):
-        chat_id = int(data.split("_")[1])
-        if chat_id not in now_playing:
-            await event.answer("Tidak ada lagu.", alert=True)
+        if not query:
+            await event.respond("❗ Contoh: `/play despacito`")
             return
-        await event.answer("⏭ Skip!")
+
+        chat_id = event.chat_id
+        status  = await event.respond(f"🔍 Mencari **{query}**...")
+
+        try:
+            info = await asyncio.to_thread(search_and_get_info, query)
+            print(f"✅ Found: {info['title']}")
+        except Exception as e:
+            await status.edit(f"❌ Gagal mencari: {e}")
+            return
+
+        get_queue(chat_id).append(info)
+
+        buttons = [
+            [Button.inline("⏭ Skip", data=f"skip_{chat_id}"),
+             Button.inline("📋 Queue", data=f"queue_{chat_id}")]
+        ]
+        await status.edit(
+            f"✅ **Ditambahkan ke antrian!**\n\n"
+            f"🎵 **{info['title']}**\n"
+            f"👤 {info['uploader']}\n"
+            f"⏱ {fmt_duration(info['duration'])}",
+            buttons=buttons,
+        )
+
+        if chat_id not in now_playing:
+            await play_next(chat_id)
+
+    @tg_bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
+    async def cmd_skip(event):
+        chat_id = event.chat_id
+        print(f"✅ /skip @ {chat_id}")
+
+        if chat_id not in now_playing:
+            await event.respond("❗ Tidak ada lagu yang sedang diputar.")
+            return
+
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
+        await event.respond("⏭ Di-skip!")
+
         try:
             await calls.leave_call(chat_id)
         except Exception:
             pass
-        try:
-            await event.edit("⏭ Di-skip!")
-        except Exception:
-            pass
+
         await play_next(chat_id)
 
-    elif data.startswith("queue_"):
-        chat_id = int(data.split("_")[1])
+    @tg_bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
+    async def cmd_queue(event):
+        chat_id = event.chat_id
         queue   = get_queue(chat_id)
-        if not queue:
-            await event.answer("Antrian kosong.", alert=True)
-        else:
-            text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(queue))
-            await event.answer(f"📋 Antrian:\n{text[:200]}", alert=True)
 
+        if not queue and chat_id not in now_playing:
+            await event.respond("📋 Antrian kosong.")
+            return
 
-@bot.on(events.NewMessage)
-async def catch_all(event):
-    print(f"📨 chat={event.chat_id} text={event.text!r}")
+        text = "📋 **Antrian**\n\n"
+        if chat_id in now_playing:
+            np    = now_playing[chat_id]
+            text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
+        for i, t in enumerate(queue, 1):
+            text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
+
+        await event.respond(text)
+
+    @tg_bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
+    async def cmd_stop(event):
+        chat_id         = event.chat_id
+        queues[chat_id] = []
+        cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
+
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
+
+        await event.respond("⏹ Stop. Antrian dikosongkan.")
+
+    @tg_bot.on(events.NewMessage(pattern=r"^/nowplaying(?:@\w+)?$", func=lambda e: e.is_group))
+    async def cmd_nowplaying(event):
+        chat_id = event.chat_id
+        if chat_id not in now_playing:
+            await event.respond("❗ Tidak ada lagu yang sedang diputar.")
+            return
+
+        np = now_playing[chat_id]
+        await event.respond(
+            f"▶️ **Now Playing**\n\n"
+            f"🎵 **{np['title']}**\n"
+            f"👤 {np['uploader']}\n"
+            f"⏱ {fmt_duration(np['duration'])}\n"
+            f"🔗 {np.get('url', '-')}"
+        )
+
+    @tg_bot.on(events.CallbackQuery)
+    async def cb_handler(event):
+        data = event.data.decode()
+        print(f"✅ Callback: {data}")
+
+        if data.startswith("skip_"):
+            chat_id = int(data.split("_")[1])
+            if chat_id not in now_playing:
+                await event.answer("Tidak ada lagu.", alert=True)
+                return
+            await event.answer("⏭ Skip!")
+            cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
+            try:
+                await calls.leave_call(chat_id)
+            except Exception:
+                pass
+            try:
+                await event.edit("⏭ Di-skip!")
+            except Exception:
+                pass
+            await play_next(chat_id)
+
+        elif data.startswith("queue_"):
+            chat_id = int(data.split("_")[1])
+            queue   = get_queue(chat_id)
+            if not queue:
+                await event.answer("Antrian kosong.", alert=True)
+            else:
+                text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(queue))
+                await event.answer(f"📋 Antrian:\n{text[:200]}", alert=True)
+
+    @tg_bot.on(events.NewMessage)
+    async def catch_all(event):
+        print(f"📨 chat={event.chat_id} text={event.text!r}")
 
 
 # ─── MAIN ────────────────────────────────────────────────────────
 
 async def main():
-    global PO_TOKEN, VISITOR_DATA
+    global PO_TOKEN, VISITOR_DATA, bot, user, calls
 
     print("🚀 Starting bot...")
 
-    # Delete webhook
+    # Delete webhook Telegram
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
@@ -544,11 +533,19 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # ── FIXED: AUTO-GENERATE VISITOR DATA SECARA LOKAL DI RAILWAY ───
+    # Generate bypass data
     VISITOR_DATA = generate_visitor_data_lokal()
     print(f"✅ Berhasil generate Token Lokal -> VISITOR_DATA: {VISITOR_DATA}")
     print(f"✅ Menggunakan PO Token Web Client: {PO_TOKEN}")
-    # ─────────────────────────────────────────────────────────────────
+
+    # FIX CRITICAL: Inisialisasi clients di dalam loop async yang aktif saat ini
+    bot   = TelegramClient("bot_session", API_ID, API_HASH)
+    user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
+    calls = PyTgCalls(user)
+
+    # Daftarkan penangan event dan callback stream ended
+    register_handlers(bot)
+    calls.on_update()(on_stream_end_handler)
 
     # Login userbot
     print("👤 Login userbot via StringSession...")
@@ -585,7 +582,7 @@ async def main():
         print(f"❌ PyTgCalls error: {e}")
         raise
 
-    # Health check server
+    # Health check server buat Railway
     async def health(request):
         return web.Response(text="OK")
 
@@ -598,7 +595,7 @@ async def main():
     print(f"✅ Health check port {port}")
     print("✅ Bot siap!")
 
-    # FIX PERSISTENT TIMESTAMP LOOP: Bungkus run_until_disconnected agar ga crash saat update macet
+    # Loop pertahanan anti crash Telethon & loop mismatch
     while True:
         try:
             await bot.run_until_disconnected()
