@@ -25,7 +25,6 @@ BOT_TOKEN    = os.getenv("BOT_TOKEN", "")
 USER_SESSION = os.getenv("USER_SESSION", "")
 
 # ─── LOGIK BYPASS MANDIRI (FIX AUTO-GENERATE) ────────────────────
-# Kita set po_token default web client bypass v1 agar bot tidak seret
 PO_TOKEN     = "web+dummy_po_token_bypass_v1"
 VISITOR_DATA = ""
 
@@ -105,7 +104,7 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":          "ba/ba*",  # FIX: Fallback format yang adaptif
+        "format":          "ba/ba*",
         "noplaylist":      True,
         "extractor_args": {
             "youtube": {
@@ -117,7 +116,6 @@ def get_ydl_opts(extra=None):
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
 
-    # Memasukkan racikan PO TOKEN mandiri ke yt-dlp
     if PO_TOKEN:
         opts["extractor_args"]["youtube"]["po_token"] = [f"{PO_TOKEN}"]
         if VISITOR_DATA:
@@ -336,10 +334,16 @@ async def play_next(chat_id: int):
         print(f"send_message error: {e}")
 
     try:
-        file_path = await asyncio.get_event_loop().run_in_executor(
+        # FIX AMAN: Mengunci pengerjaan pada loop aktif agar tidak memicu thread pool mismatch
+        loop = asyncio.get_running_loop()
+        
+        file_path = await loop.run_in_executor(
             None, download_audio, track["url"], f"{chat_id}_{safe}"
         )
+        
+        # Pengecekan krusial sebelum melempar stream data ke voice channel
         await calls.play(chat_id, MediaStream(file_path))
+        
         now_playing[chat_id]["file_path"] = file_path
         print(f"▶️ Playing {track['title']} @ {chat_id}")
     except Exception as e:
