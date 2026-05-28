@@ -232,7 +232,7 @@ async def play_next(chat_id: int):
 
 
 @calls.on_update()
-async def on_stream_end(update):
+async def on_stream_end(client, update):
     if not isinstance(update, StreamEnded):
         return
     chat_id = update.chat_id
