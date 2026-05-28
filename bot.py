@@ -21,48 +21,28 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # ─── Cari JS runtime ─────────────────────────────────────────────
 def find_runtime():
-    # yt-dlp supported: deno, node, bun, quickjs
-    candidates = [
-        ("deno", "deno"),
-        ("node", "node"),
-        ("bun", "bun"),
-    ]
-    for binary, ytdlp_key in candidates:
+    for binary in ["deno", "node", "bun"]:
         try:
             r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
             if r.returncode == 0:
                 w = subprocess.run(["which", binary], capture_output=True, text=True)
                 path = w.stdout.strip() if w.returncode == 0 else binary
                 print(f"✅ {binary} ditemukan: {path}")
-                return ytdlp_key, path
+                return binary, path
         except Exception:
             pass
 
-    # Cari node di nix store (Railway)
+    # Cari node di nix store
     try:
         r = subprocess.run(
             ["find", "/nix/store", "-name", "node", "-type", "f"],
             capture_output=True, text=True, timeout=15
         )
         if r.returncode == 0 and r.stdout.strip():
-            candidates_nix = [p for p in r.stdout.strip().split("\n") if "/bin/node" in p]
-            if candidates_nix:
-                path = candidates_nix[0]
-                print(f"✅ node ditemukan di nix store: {path}")
-                return "node", path
-    except Exception:
-        pass
-
-    # Cari deno di nix store
-    try:
-        r = subprocess.run(
-            ["find", "/nix/store", "-name", "deno", "-type", "f"],
-            capture_output=True, text=True, timeout=15
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            path = r.stdout.strip().split("\n")[0]
-            print(f"✅ deno ditemukan di nix store: {path}")
-            return "deno", path
+            candidates = [p for p in r.stdout.strip().split("\n") if "/bin/node" in p]
+            if candidates:
+                print(f"✅ node ditemukan di nix store: {candidates[0]}")
+                return "node", candidates[0]
     except Exception:
         pass
 
@@ -89,13 +69,25 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 30,
         "format": "bestaudio/best",
         "noplaylist": True,
+        # Download challenge solver dari GitHub otomatis
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web", "android"],
+            }
+        },
     }
+
     # Cookies hanya pakai kalau file ada dan tidak kosong
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
-    # Format js_runtimes yang benar untuk yt-dlp
+
+    # JS runtime
     if JS_RUNTIME_KEY and JS_RUNTIME_PATH:
         opts["js_runtimes"] = {JS_RUNTIME_KEY: {"path": JS_RUNTIME_PATH}}
+
+    # Aktifkan remote challenge solver (ejs:github)
+    opts["allow_unplayable_formats"] = False
+
     if extra:
         opts.update(extra)
     return opts
