@@ -33,7 +33,7 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 print("🚀 [2/5] Dirs created...")
 
-# ─── Hapus session lama yang conflict ────────────────────────────
+# ─── Hapus session lama ───────────────────────────────────────────
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     try:
         os.remove(f)
@@ -67,10 +67,7 @@ def get_queue(chat_id):
 def find_runtime():
     for binary in ["node", "deno", "bun"]:
         try:
-            r = subprocess.run(
-                [binary, "--version"],
-                capture_output=True, text=True, timeout=3
-            )
+            r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=3)
             if r.returncode == 0:
                 print(f"✅ JS Runtime: {binary}")
                 return binary, binary
@@ -99,22 +96,17 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 30,
         "format": "bestaudio/best",
         "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["web", "android"],
-            }
-        },
+        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
     }
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
-        print("🍪 Menggunakan cookies.txt")
     if js_key and js_path:
         opts["js_runtimes"] = {js_key: {"path": js_path}}
     if extra:
         opts.update(extra)
     return opts
 
-# ─── Search info ─────────────────────────────────────────────────
+# ─── Search ──────────────────────────────────────────────────────
 def search_and_get_info(query: str) -> dict:
     ydl_opts = get_ydl_opts({"default_search": "ytsearch1"})
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -131,16 +123,12 @@ def search_and_get_info(query: str) -> dict:
             "uploader": info.get("uploader", "Unknown"),
         }
 
-# ─── Download audio ───────────────────────────────────────────────
+# ─── Download ────────────────────────────────────────────────────
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     ydl_opts = get_ydl_opts({
         "outtmpl": output_path + ".%(ext)s",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "128",
-        }],
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "128"}],
     })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -169,29 +157,20 @@ async def play_next(chat_id: int):
     track = queue.pop(0)
     now_playing[chat_id] = track
 
-    safe_title = "".join(
-        c for c in track["title"][:30] if c.isalnum() or c in " _-"
-    ).replace(" ", "_")
+    safe_title = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
     filename = f"{chat_id}_{safe_title}"
 
     await app.send_message(
         chat_id,
-        f"▶️ *Now Playing*\n\n"
-        f"🎵 *{track['title']}*\n"
-        f"👤 {track['uploader']}\n"
-        f"⏱ {fmt_duration(track['duration'])}\n"
-        f"🔗 {track['url']}",
+        f"▶️ *Now Playing*\n\n🎵 *{track['title']}*\n👤 {track['uploader']}\n⏱ {fmt_duration(track['duration'])}\n🔗 {track['url']}",
         parse_mode="markdown",
     )
 
     try:
-        file_path = await asyncio.get_event_loop().run_in_executor(
-            None, download_audio, track["url"], filename
-        )
+        file_path = await asyncio.get_event_loop().run_in_executor(None, download_audio, track["url"], filename)
         await calls.play(chat_id, MediaStream(file_path))
         now_playing[chat_id]["file_path"] = file_path
         print(f"▶️ Playing: {track['title']} di chat {chat_id}")
-
     except Exception as e:
         print(f"❌ Error play: {e}")
         await app.send_message(chat_id, f"❌ Error memutar lagu: {e}")
@@ -209,6 +188,11 @@ async def on_stream_end(client, update: StreamEnded):
         except Exception:
             pass
     await play_next(chat_id)
+
+# ─── CATCH ALL — debug semua pesan masuk ─────────────────────────
+@app.on_message()
+async def catch_all(_, msg: Message):
+    print(f"📨 PESAN MASUK | chat={msg.chat.id} | type={msg.chat.type} | text={msg.text}")
 
 # ─── /start ──────────────────────────────────────────────────────
 @app.on_message(filters.command("start"))
@@ -233,45 +217,29 @@ async def cmd_start(_, msg: Message):
 async def cmd_play(_, msg: Message):
     query = " ".join(msg.command[1:])
     print(f"📩 /play '{query}' dari chat {msg.chat.id}")
-
     if not query:
-        await msg.reply_text(
-            "❗ Gunakan: `/play <judul lagu>`\nContoh: `/play despacito`",
-            parse_mode="markdown"
-        )
+        await msg.reply_text("❗ Gunakan: `/play <judul lagu>`\nContoh: `/play despacito`", parse_mode="markdown")
         return
-
     chat_id = msg.chat.id
     status_msg = await msg.reply_text(f"🔍 Mencari: *{query}*...", parse_mode="markdown")
-
     try:
-        info = await asyncio.get_event_loop().run_in_executor(
-            None, search_and_get_info, query
-        )
+        info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
         print(f"✅ Ditemukan: {info['title']}")
     except Exception as e:
         print(f"❌ Gagal cari: {e}")
         await status_msg.edit_text(f"❌ Gagal mencari lagu: {e}")
         return
-
     queue = get_queue(chat_id)
     queue.append(info)
-
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("⏭ Skip", callback_data=f"skip_{chat_id}"),
         InlineKeyboardButton("📋 Queue", callback_data=f"queue_{chat_id}"),
     ]])
-
     await status_msg.edit_text(
-        f"✅ *Ditambahkan ke antrian!*\n\n"
-        f"🎵 *{info['title']}*\n"
-        f"👤 {info['uploader']}\n"
-        f"⏱ {fmt_duration(info['duration'])}\n"
-        f"🔗 {info['url']}",
+        f"✅ *Ditambahkan ke antrian!*\n\n🎵 *{info['title']}*\n👤 {info['uploader']}\n⏱ {fmt_duration(info['duration'])}\n🔗 {info['url']}",
         parse_mode="markdown",
         reply_markup=keyboard,
     )
-
     if chat_id not in now_playing:
         await play_next(chat_id)
 
@@ -286,14 +254,10 @@ async def cmd_skip(_, msg: Message):
     track = now_playing.pop(chat_id, {})
     fp = track.get("file_path")
     if fp and os.path.exists(fp):
-        try:
-            os.remove(fp)
-        except Exception:
-            pass
-    try:
-        await calls.leave_call(chat_id)
-    except Exception:
-        pass
+        try: os.remove(fp)
+        except Exception: pass
+    try: await calls.leave_call(chat_id)
+    except Exception: pass
     await play_next(chat_id)
 
 # ─── /queue ──────────────────────────────────────────────────────
@@ -318,10 +282,8 @@ async def cmd_clear(_, msg: Message):
     chat_id = msg.chat.id
     queues[chat_id] = []
     now_playing.pop(chat_id, None)
-    try:
-        await calls.leave_call(chat_id)
-    except Exception:
-        pass
+    try: await calls.leave_call(chat_id)
+    except Exception: pass
     await msg.reply_text("🗑 Antrian dihapus.")
 
 # ─── /stop ───────────────────────────────────────────────────────
@@ -330,10 +292,8 @@ async def cmd_stop(_, msg: Message):
     chat_id = msg.chat.id
     queues[chat_id] = []
     now_playing.pop(chat_id, None)
-    try:
-        await calls.leave_call(chat_id)
-    except Exception:
-        pass
+    try: await calls.leave_call(chat_id)
+    except Exception: pass
     await msg.reply_text("⏹ Stop & keluar dari voice chat.")
 
 # ─── /nowplaying ─────────────────────────────────────────────────
@@ -345,11 +305,7 @@ async def cmd_nowplaying(_, msg: Message):
         return
     np = now_playing[chat_id]
     await msg.reply_text(
-        f"▶️ *Now Playing*\n\n"
-        f"🎵 *{np['title']}*\n"
-        f"👤 {np['uploader']}\n"
-        f"⏱ {fmt_duration(np['duration'])}\n"
-        f"🔗 {np.get('url', '-')}",
+        f"▶️ *Now Playing*\n\n🎵 *{np['title']}*\n👤 {np['uploader']}\n⏱ {fmt_duration(np['duration'])}\n🔗 {np.get('url', '-')}",
         parse_mode="markdown",
     )
 
@@ -358,26 +314,20 @@ async def cmd_nowplaying(_, msg: Message):
 async def callback_handler(_, cq):
     data = cq.data
     await cq.answer()
-
     if data.startswith("skip_"):
         chat_id = int(data.split("_")[1])
         if chat_id not in now_playing:
-            await cq.answer("Tidak ada lagu yang sedang diputar.", show_alert=True)
+            await cq.answer("Tidak ada lagu.", show_alert=True)
             return
         track = now_playing.pop(chat_id, {})
         fp = track.get("file_path")
         if fp and os.path.exists(fp):
-            try:
-                os.remove(fp)
-            except Exception:
-                pass
-        try:
-            await calls.leave_call(chat_id)
-        except Exception:
-            pass
+            try: os.remove(fp)
+            except Exception: pass
+        try: await calls.leave_call(chat_id)
+        except Exception: pass
         await cq.edit_message_text("⏭ Diskip!")
         await play_next(chat_id)
-
     elif data.startswith("queue_"):
         chat_id = int(data.split("_")[1])
         queue = get_queue(chat_id)
@@ -387,29 +337,27 @@ async def callback_handler(_, cq):
             text = "\n".join([f"{i+1}. {t['title']}" for i, t in enumerate(queue)])
             await cq.answer(f"📋 Antrian:\n{text}", show_alert=True)
 
-# ─── Start bot dengan retry FloodWait ────────────────────────────
+# ─── Start dengan FloodWait retry ────────────────────────────────
 async def start_bot_with_retry():
-    max_retries = 3
-    for attempt in range(max_retries):
+    for attempt in range(5):
         try:
             await app.start()
             me = await app.get_me()
             print(f"✅ Bot login sebagai @{me.username} (id={me.id})")
             return
         except FloodWait as e:
-            wait = e.value + 5  # tambah 5 detik buffer
-            print(f"⏳ FloodWait: nunggu {wait} detik... (attempt {attempt+1}/{max_retries})")
+            wait = e.value + 5
+            print(f"⏳ FloodWait: nunggu {wait} detik... (attempt {attempt+1}/5)")
             await asyncio.sleep(wait)
         except Exception as e:
-            print(f"❌ Gagal start Hydrogram: {e}")
+            print(f"❌ Gagal start: {e}")
             raise
-    raise Exception("❌ Gagal login setelah 3x retry FloodWait")
+    raise Exception("❌ Gagal login setelah 5x retry")
 
 # ─── Main ────────────────────────────────────────────────────────
 async def main():
     print("🚀 [5/5] Starting bot...")
 
-    # Hapus webhook → paksa polling
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
@@ -419,7 +367,6 @@ async def main():
     except Exception as e:
         print(f"⚠️  Gagal hapus webhook: {e}")
 
-    # Start bot dengan FloodWait retry otomatis
     await start_bot_with_retry()
 
     try:
@@ -429,7 +376,6 @@ async def main():
         print(f"❌ Gagal start PyTgCalls: {e}")
         raise
 
-    # Health check server
     async def health(request):
         return web.Response(text="OK")
 
