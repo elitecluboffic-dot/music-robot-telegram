@@ -132,13 +132,28 @@ def get_ydl_opts(extra=None):
 
 def search_and_get_info(query: str) -> dict:
     """
-    FIX: entries adalah generator di yt-dlp terbaru,
-    harus di-convert ke list dulu sebelum di-index.
+    Ambil info lagu tanpa download.
+    Format tidak di-validasi saat info fetch — biar tidak OOM/format error.
     """
-    info_opts = get_ydl_opts({
-        "default_search": "ytsearch1",
+    info_opts = {
+        "quiet":          True,
+        "no_warnings":    True,
         "skip_download":  True,
-    })
+        "noplaylist":     True,
+        "default_search": "ytsearch1",
+        "ignoreerrors":   False,
+        "socket_timeout": 30,
+        # Jangan set "format" di sini — biar tidak trigger format check saat info
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "android", "mweb", "web"],
+            }
+        },
+    }
+
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        info_opts["cookiefile"] = COOKIES_FILE
+
     with yt_dlp.YoutubeDL(info_opts) as ydl:
         info = ydl.extract_info(query, download=False)
 
