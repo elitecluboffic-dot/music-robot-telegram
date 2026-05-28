@@ -92,12 +92,11 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":         "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-        "format_sort":    ["abr", "asr"],
+        "format":         "bestaudio/best",  # paling relaxed, ambil apapun yg ada
         "noplaylist":     True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb"],
+                "player_client": ["ios", "android", "mweb", "web"],
             }
         },
         "http_headers": {
@@ -197,7 +196,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
-            "format":  "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+            "format":  "bestaudio/best",
             "postprocessors": [{
                 "key":              "FFmpegExtractAudio",
                 "preferredcodec":   "mp3",
@@ -223,7 +222,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a2.%(ext)s",
-            "format":  "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+            "format":  "bestaudio/best",
             "extractor_args": {
                 "youtube": {"player_client": ["ios"]}
             },
