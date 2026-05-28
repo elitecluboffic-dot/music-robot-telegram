@@ -42,13 +42,13 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
 
 if not USER_SESSION:
-    raise ValueError("USER_SESSION tidak ada! Jalankan gen_session.py dulu di lokal.")
+    raise ValueError("USER_SESSION tidak ada! Masukkan StringSession baru di Railway variables.")
 
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Hapus session bot lama sebelum startup
+# Hapus session bot lama sebelum startup biar gak bentrok IP
 for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journal"):
     try:
         os.remove(f)
@@ -142,9 +142,9 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":         "bestaudio/best",  # Balik ke format audio murni karena dibantu proxy
+        "format":         "bestaudio/best",  
         "noplaylist":      True,
-        "proxy":          get_dynamic_free_proxy(),  # 🔥 Inject proxy dinamis
+        "proxy":          get_dynamic_free_proxy(),  # Inject proxy otomatis
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
@@ -189,7 +189,7 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
-        "proxy":          get_dynamic_free_proxy(),  # 🔥 Inject proxy dinamis pas searching info
+        "proxy":          get_dynamic_free_proxy(),  # Inject proxy pas nyari info lagu
         "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
