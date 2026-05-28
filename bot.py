@@ -31,7 +31,6 @@ PO_TOKEN     = "web+dummy_po_token_bypass_v1"
 VISITOR_DATA = ""
 
 def generate_visitor_data_lokal():
-    """Membuat visitor data tiruan dengan format base64 khas YouTube scr mandiri"""
     random_bytes = secrets.token_bytes(12)
     encoded = base64.b64encode(random_bytes).decode('utf-8')
     visitor = "Cg9leU" + encoded.replace('+', '-').replace('/', '_').replace('=', '')
@@ -48,19 +47,17 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Hapus session bot lama sebelum startup biar gak bentrok IP
+# Hapus session bot lama sebelum startup
 for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journal"):
     try:
         os.remove(f)
     except Exception:
         pass
 
-# ─── GLOBAL CLIENTS (DI-INISIALISASI DI DALAM MAIN) ───────────────
 bot   = None
 user  = None
 calls = None
 
-# ─── STATE ───────────────────────────────────────────────────────
 queues: dict      = {}
 now_playing: dict = {}
 
@@ -86,16 +83,13 @@ def cleanup_file(fp):
 # ─── SMART DYNAMIC PROXY SYSTEM (VALIDASI AUTO RETRY) ────────────
 
 def get_dynamic_free_proxy():
-    """Mengambil proxy dinamis dari Geonode API dengan Fallback Auto-Scrape GitHub + Validasi Idup/Mati"""
     api_key = os.getenv("GEONODE_API_KEY")
     proxy_pool = []
     
-    # ─── LANGKAH 1: KUMPULIN IP PROXY YANG ADA ───────────────────
-    # Coba dari Geonode dulu
     if api_key:
         try:
             url = f"https://api.geonode.com/gproxi/v1/proxies?apiKey={api_key}&limit=5&protocols=http&anonymityLevel=elite"
-            response = requests.get(url, timeout=4)
+            response = requests.get(url, timeout=3)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("data"):
@@ -104,46 +98,40 @@ def get_dynamic_free_proxy():
         except Exception as e:
             print(f"⚠️ Geonode API error/timeout: {e}")
 
-    # Kalau Geonode dapet dikit atau gak dapet sama sekali, backup pake GitHub Scrape
     if len(proxy_pool) < 3:
         try:
             fallback_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
-            resp = requests.get(fallback_url, timeout=4)
+            resp = requests.get(fallback_url, timeout=3)
             if resp.status_code == 200:
                 proxies = resp.text.strip().split("\n")
                 if proxies:
-                    # Ambil 15 acak buat kita filter/tes
-                    sampled = random.sample(proxies, min(15, len(proxies)))
+                    sampled = random.sample(proxies, min(20, len(proxies)))
                     for p in sampled:
                         proxy_pool.append(f"http://{p.strip()}")
         except Exception as e:
             print(f"❌ Gagal scrape proxy backup dari GitHub: {e}")
 
     if not proxy_pool:
-        print("❌ Pool proxy kosong total! Gak ada IP yang bisa dipakai.")
         return None
 
-    # ─── LANGKAH 2: TES PROXY SATU-SATU SAMPAI DAPET YANG IDUP ───
-    print(f"🔄 Memulai pengetesan dari {len(proxy_pool)} kandidat proxy...")
-    random.shuffle(proxy_pool) # Diacak biar gak rebutan IP sama orang lain
+    print(f"🔄 Memulai validasi dari {len(proxy_pool)} kandidat proxy...")
+    random.shuffle(proxy_pool)
     
-    for attempt, proxy_str in enumerate(proxy_pool[:6], 1): # Maksimal nyoba 6 proxy berbeda
+    for attempt, proxy_str in enumerate(proxy_pool[:8], 1):
         try:
-            # Test proxy pake request ringan ke httpbin atau google buat mastiin gak 503/RTO
-            test_resp = requests.get("http://httpbin.org/ip", proxies={"http": proxy_str, "https": proxy_str}, timeout=3)
+            # Tes ke google langsung biar bener-bener akurat buat koneksi luar
+            test_resp = requests.get("https://www.google.com", proxies={"http": proxy_str, "https": proxy_str}, timeout=2.5)
             if test_resp.status_code == 200:
-                print(f"✅ Proxy Idup & Lolos Validasi pada percobaan ke-{attempt}: {proxy_str}")
+                print(f"✅ Proxy OK (Percobaan {attempt}): {proxy_str}")
                 return proxy_str
         except Exception:
-            print(f"❌ Proxy mati/503 (Percobaan {attempt}/6): {proxy_str} -> Skip...")
             continue
 
-    # Kalau terpaksa semuanya zonk, lempar aja 1 acak siapa tahu hoki di yt-dlp
     fallback_pick = random.choice(proxy_pool)
-    print(f"⚠️ Semua proxy test zonk, terpaksa pakai IP nekat: {fallback_pick}")
+    print(f"⚠️ Proxy test semuanya lambat, pakai nekat: {fallback_pick}")
     return fallback_pick
 
-# ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
+# ─── YT-DLP CONFIGURATIONS (TIMEOUT DIPERKETAT) ──────────────────
 _JS_KEY  = None
 _JS_PATH = None
 
@@ -152,7 +140,7 @@ def get_ydl_opts(extra=None):
     if _JS_KEY is None:
         for binary in ["node", "deno", "bun"]:
             try:
-                r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=3)
+                r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=2)
                 if r.returncode == 0:
                     _JS_KEY, _JS_PATH = binary, binary
                     break
@@ -162,10 +150,10 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 30,
+        "socket_timeout": 12,  # 🔥 Diperketat ke 12s biar gak ngehang nungguin proxy lelet!
         "format":         "bestaudio/best",  
         "noplaylist":      True,
-        "proxy":          get_dynamic_free_proxy(),  # Inject proxy terverifikasi
+        "proxy":          get_dynamic_free_proxy(),  
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "web"],
@@ -209,8 +197,8 @@ def search_and_get_info(query: str) -> dict:
         "noplaylist":      True,
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
-        "socket_timeout": 30,
-        "proxy":          get_dynamic_free_proxy(),  # Inject proxy pas nyari info lagu
+        "socket_timeout": 12, # 🔥 Ketat biar gak ngehang pas nyari info lagu
+        "proxy":          get_dynamic_free_proxy(),  
         "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
@@ -280,7 +268,6 @@ def download_audio(url: str, filename: str) -> str:
             ydl.download([url])
 
         if os.path.exists(mp3_path):
-            print("✅ Download & Konversi ke MP3 sukses.")
             return mp3_path
 
         for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
@@ -292,12 +279,12 @@ def download_audio(url: str, filename: str) -> str:
                 return _convert_to_mp3(fp, mp3_path)
 
     except Exception as e:
-        print(f"⚠️ Proses download gagal: {e}")
+        print(f"⚠️ Proses download gagal/timeout: {e}")
 
-    raise Exception("Proxy diblokir atau limit kuota habis! Jalur download YouTube gagal.")
+    raise Exception("Koneksi proxy macet atau diblokir YouTube! Mencoba ulang otomatis...")
 
 
-# ─── PLAY LOGIC ──────────────────────────────────────────────────
+# ─── PLAY LOGIC (FIX RETRY AUTO-LOOP) ────────────────────────────
 
 async def play_next(chat_id: int):
     queue = get_queue(chat_id)
@@ -317,34 +304,38 @@ async def play_next(chat_id: int):
     now_playing[chat_id] = track
     safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
 
+    msg = None
     try:
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id,
             f"▶️ **Now Playing**\n\n"
             f"🎵 **{track['title']}**\n"
-            f"👤 {track['uploader']}\n"
             f"⏱ {fmt_duration(track['duration'])}\n"
-            f"🔗 {track['url']}",
+            f"⏳ *Sedang memproses audio (Anti-Stuck Aktif)...*",
         )
     except Exception as e:
         print(f"send_message error: {e}")
 
+    # Coba download, kalau gagal karena proxy macet/timeout, loop panggil fungsi ini lagi buat otomatis cari proxy baru
     try:
         file_path = await asyncio.to_thread(
             download_audio, track["url"], f"{chat_id}_{safe}"
         )
         
         await calls.play(chat_id, MediaStream(file_path))
-        
         now_playing[chat_id]["file_path"] = file_path
-        print(f"▶️ Playing {track['title']} @ {chat_id}")
+        
+        if msg:
+            try:
+                await msg.edit(f"▶️ **Playing:** `{track['title']}`\n🎵 Jalur streaming berhasil dibuka!")
+            except Exception:
+                pass
     except Exception as e:
-        print(f"play error: {e}")
-        try:
-            await bot.send_message(chat_id, f"❌ Error memutar lagu: {e}")
-        except Exception:
-            pass
-        await play_next(chat_id)
+        print(f"❌ Play error (Otomatis ganti proxy baru): {e}")
+        # Kembalikan lagu ke antrian paling depan karena belum sukses diputar
+        queue.insert(0, track)
+        await asyncio.sleep(2)
+        await play_next(chat_id) # Pancing ulang loop biar dapet proxy baru yang segar
 
 
 async def on_stream_end_handler(client, update):
@@ -360,16 +351,12 @@ async def on_stream_end_handler(client, update):
 def register_handlers(tg_bot):
     @tg_bot.on(events.NewMessage(pattern=r"^/start"))
     async def cmd_start(event):
-        print(f"✅ /start dari {event.sender_id}")
         await event.respond(
-            "🎵 **Music Bot**\n\n"
-            "Commands di grup dengan Voice Chat aktif:\n"
+            "🎵 **Music Bot Aktif**\n\n"
             "▶️ `/play <lagu>` — putar lagu\n"
             "⏭ `/skip` — skip lagu\n"
             "📋 `/queue` — lihat antrian\n"
-            "⏹ `/stop` — stop & kosongkan antrian\n"
-            "🎧 `/nowplaying` — lagu yang sedang diputar\n\n"
-            "Contoh: `/play despacito`"
+            "⏹ `/stop` — stop & clear"
         )
 
     @tg_bot.on(events.NewMessage(pattern=r"^/play(?:@\w+)?(?:\s+(.+))?$", func=lambda e: e.is_group))
@@ -377,7 +364,6 @@ def register_handlers(tg_bot):
         query = event.pattern_match.group(1)
         if query:
             query = query.strip()
-        print(f"✅ /play '{query}' @ {event.chat_id}")
 
         if not query:
             await event.respond("❗ Contoh: `/play despacito`")
@@ -388,9 +374,8 @@ def register_handlers(tg_bot):
 
         try:
             info = await asyncio.to_thread(search_and_get_info, query)
-            print(f"✅ Found: {info['title']}")
         except Exception as e:
-            await status.edit(f"❌ Gagal mencari: {e}")
+            await status.edit(f"❌ Gagal mencari info: {e}")
             return
 
         get_queue(chat_id).append(info)
@@ -402,7 +387,6 @@ def register_handlers(tg_bot):
         await status.edit(
             f"✅ **Ditambahkan ke antrian!**\n\n"
             f"🎵 **{info['title']}**\n"
-            f"👤 {info['uploader']}\n"
             f"⏱ {fmt_duration(info['duration'])}",
             buttons=buttons,
         )
@@ -413,20 +397,16 @@ def register_handlers(tg_bot):
     @tg_bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
     async def cmd_skip(event):
         chat_id = event.chat_id
-        print(f"✅ /skip @ {chat_id}")
-
         if chat_id not in now_playing:
             await event.respond("❗ Tidak ada lagu yang sedang diputar.")
             return
 
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
         await event.respond("⏭ Di-skip!")
-
         try:
             await calls.leave_call(chat_id)
         except Exception:
             pass
-
         await play_next(chat_id)
 
     @tg_bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
@@ -444,7 +424,6 @@ def register_handlers(tg_bot):
             text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
         for i, t in enumerate(queue, 1):
             text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
-
         await event.respond(text)
 
     @tg_bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
@@ -452,35 +431,15 @@ def register_handlers(tg_bot):
         chat_id         = event.chat_id
         queues[chat_id] = []
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-
         try:
             await calls.leave_call(chat_id)
         except Exception:
             pass
-
         await event.respond("⏹ Stop. Antrian dikosongkan.")
-
-    @tg_bot.on(events.NewMessage(pattern=r"^/nowplaying(?:@\w+)?$", func=lambda e: e.is_group))
-    async def cmd_nowplaying(event):
-        chat_id = event.chat_id
-        if chat_id not in now_playing:
-            await event.respond("❗ Tidak ada lagu yang sedang diputar.")
-            return
-
-        np = now_playing[chat_id]
-        await event.respond(
-            f"▶️ **Now Playing**\n\n"
-            f"🎵 **{np['title']}**\n"
-            f"👤 {np['uploader']}\n"
-            f"⏱ {fmt_duration(np['duration'])}\n"
-            f"🔗 {np.get('url', '-')}"
-        )
 
     @tg_bot.on(events.CallbackQuery)
     async def cb_handler(event):
         data = event.data.decode()
-        print(f"✅ Callback: {data}")
-
         if data.startswith("skip_"):
             chat_id = int(data.split("_")[1])
             if chat_id not in now_playing:
@@ -492,24 +451,7 @@ def register_handlers(tg_bot):
                 await calls.leave_call(chat_id)
             except Exception:
                 pass
-            try:
-                await event.edit("⏭ Di-skip!")
-            except Exception:
-                pass
             await play_next(chat_id)
-
-        elif data.startswith("queue_"):
-            chat_id = int(data.split("_")[1])
-            queue   = get_queue(chat_id)
-            if not queue:
-                await event.answer("Antrian kosong.", alert=True)
-            else:
-                text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(queue))
-                await event.answer(f"📋 Antrian:\n{text[:200]}", alert=True)
-
-    @tg_bot.on(events.NewMessage)
-    async def catch_all(event):
-        print(f"📨 chat={event.chat_id} text={event.text!r}")
 
 
 # ─── MAIN ────────────────────────────────────────────────────────
@@ -518,20 +460,14 @@ async def main():
     global PO_TOKEN, VISITOR_DATA, bot, user, calls
 
     print("🚀 Starting bot...")
-
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
-            async with session.get(url) as r:
-                d = await r.json()
-                print(f"🔧 deleteWebhook: {d.get('description', d)}")
-    except Exception as e:
-        print(f"⚠️ deleteWebhook error: {e}")
+            await session.get(url)
+    except Exception:
+        pass
 
     VISITOR_DATA = generate_visitor_data_lokal()
-    print(f"✅ Berhasil generate Token Lokal -> VISITOR_DATA: {VISITOR_DATA}")
-    print(f"✅ Menggunakan PO Token Web Client: {PO_TOKEN}")
-
     bot   = TelegramClient("bot_session", API_ID, API_HASH)
     user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
     calls = PyTgCalls(user)
@@ -539,37 +475,9 @@ async def main():
     register_handlers(bot)
     calls.on_update()(on_stream_end_handler)
 
-    print("👤 Login userbot via StringSession...")
-    try:
-        await user.start()
-        me = await user.get_me()
-        print(f"✅ Userbot login: @{me.username or me.first_name} (id={me.id})")
-    except Exception as e:
-        print(f"❌ Userbot login error: {e}")
-        raise
-
-    for attempt in range(10):
-        try:
-            await bot.start(bot_token=BOT_TOKEN)
-            me = await bot.get_me()
-            print(f"✅ Bot login: @{me.username} (id={me.id})")
-            break
-        except FloodWaitError as e:
-            wait = e.seconds + 5
-            print(f"⏳ FloodWait {wait}s... attempt {attempt+1}/10")
-            await asyncio.sleep(wait)
-        except Exception as e:
-            print(f"❌ Bot login error: {e}")
-            raise
-    else:
-        raise Exception("Gagal login bot 10x")
-
-    try:
-        await calls.start()
-        print("✅ PyTgCalls started (userbot)")
-    except Exception as e:
-        print(f"❌ PyTgCalls error: {e}")
-        raise
+    await user.start()
+    await bot.start(bot_token=BOT_TOKEN)
+    await calls.start()
 
     async def health(request):
         return web.Response(text="OK")
@@ -578,25 +486,17 @@ async def main():
     server.router.add_get("/", health)
     runner = web.AppRunner(server)
     await runner.setup()
-    port = int(os.getenv("PORT", 8080))
-    await web.TCPSite(runner, "0.0.0.0", port).start()
-    print(f"✅ Health check port {port}")
+    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
     print("✅ Bot siap!")
 
     while True:
         try:
             await bot.run_until_disconnected()
-        except (FloodWaitError, asyncio.CancelledError):
-            break
         except Exception as e:
-            if "PersistentTimestampOutdatedError" in str(e) or "timestamp" in str(e).lower():
-                print("⚠️ Telethon Warning: Mengabaikan timestamp outdated internal Telegram, bot lanjut jalan...")
+            if "timestamp" in str(e).lower():
                 await asyncio.sleep(2)
                 continue
-            else:
-                print(f"❌ Unhandled loop error: {e}")
-                await asyncio.sleep(5)
-
+            break
 
 if __name__ == "__main__":
     asyncio.run(main())
