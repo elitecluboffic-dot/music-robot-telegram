@@ -8,9 +8,10 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserAlreadyParticipant, ChatAdminRequired
 
-from pytgcalls import PyTgCalls
+from pytgcalls import GroupCallManager as PyTgCalls
 from pytgcalls.types import MediaStream
 from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
+
 
 load_dotenv()
 
