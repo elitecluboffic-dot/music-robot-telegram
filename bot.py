@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 from aiohttp import web
 
 from telethon import TelegramClient, events, Button
+from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
+from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls import filters as tg_filters
@@ -19,13 +21,13 @@ load_dotenv()
 API_ID    = int(os.getenv("API_ID", 0))
 API_HASH  = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-USER_PHONE = os.getenv("USER_PHONE", "")  # nomor HP userbot, contoh: +6281234567890
+USER_SESSION = os.getenv("USER_SESSION", "")  # dari gen_session.py
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
 
-if not USER_PHONE:
-    raise ValueError("USER_PHONE tidak ada! Isi nomor HP akun Telegram di env.")
+if not USER_SESSION:
+    raise ValueError("USER_SESSION tidak ada! Jalankan gen_session.py dulu di lokal.")
 
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
@@ -44,7 +46,7 @@ for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journ
 bot = TelegramClient("bot_session", API_ID, API_HASH)
 
 # Userbot client — yang masuk ke Voice Chat
-user = TelegramClient("user_session", API_ID, API_HASH)
+user = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
 
 # PyTgCalls pakai userbot, bukan bot!
 calls = PyTgCalls(user)
@@ -422,9 +424,9 @@ async def main():
         print(f"⚠️ deleteWebhook error: {e}")
 
     # Login userbot (akun biasa untuk Voice Chat)
-    print(f"👤 Login userbot {USER_PHONE}...")
+    print("👤 Login userbot via StringSession...")
     try:
-        await user.start(phone=USER_PHONE)
+        await user.start()
         me = await user.get_me()
         print(f"✅ Userbot login: @{me.username or me.first_name} (id={me.id})")
     except Exception as e:
