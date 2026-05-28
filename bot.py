@@ -101,14 +101,19 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":          "ba/ba*/best",  # Fallback ke format video jika audio murni tidak ada
+        "format":         "bestaudio/best",  # 🔥 FIX UTAMA: Standar ekstraksi stream audio paling aman
         "noplaylist":      True,
         "extractor_args": {
             "youtube": {
-                # 🔥 FIX: Diutamakan mobile client untuk meloloskan diri dari blokir IP datacenter
-                "player_client": ["android", "ios", "web", "mweb"],
+                # 🔥 FIX UTAMA: Penggabungan client agar yt-dlp melakukan rotasi fallback internal otomatis
+                "player_client": ["android", "ios", "mweb", "web"],
             }
         },
+        "postprocessors": [{
+            "key":              "FFmpegExtractAudio",
+            "preferredcodec":   "mp3",
+            "preferredquality": "128",
+        }],
     }
 
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
@@ -143,11 +148,10 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
-        "format":          "ba/ba*/best",  # Pastikan format fleksibel agar tidak melempar error kosong
+        "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
-                # 📱 FIX UTAMA: Kunci hanya ke mobile client saja saat mencari info agar tidak dianggap bot spam oleh YouTube
-                "player_client": ["android", "ios"],
+                "player_client": ["android", "ios", "mweb"],
             }
         },
     }
@@ -187,15 +191,6 @@ def search_and_get_info(query: str) -> dict:
         }
 
 
-def _find_downloaded_file(base_path: str, suffixes: list) -> str | None:
-    for suffix in suffixes:
-        for ext in ["mp3", "m4a", "webm", "opus", "ogg", "mp4", "aac"]:
-            p = f"{base_path}{suffix}.{ext}"
-            if os.path.exists(p):
-                return p
-    return None
-
-
 def _convert_to_mp3(src: str, dest: str) -> str:
     subprocess.run(
         ["ffmpeg", "-y", "-i", src,
@@ -210,98 +205,36 @@ def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     mp3_path    = output_path + ".mp3"
 
-    print(f"⬇️ Attempt 1: android murni...")
+    # Bersihkan file sampah sisa crash sebelumnya
+    cleanup_file(mp3_path)
+
+    print(f"⬇️ Memproses download via yt-dlp...")
     try:
         opts = get_ydl_opts({
-            "outtmpl": output_path + ".%(ext)s",
-            "format":  "ba/ba*/best",
-            "extractor_args": {
-                "youtube": {"player_client": ["android"]}
-            },
-            "postprocessors": [{
-                "key":              "FFmpegExtractAudio",
-                "preferredcodec":   "mp3",
-                "preferredquality": "128",
-            }],
+            "outtmpl": output_path + "._tmp.%(ext)s",
         })
+        
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
+        # FFmpegExtractAudio pasca-proses otomatis menghasilkan .mp3 langsung jika sukses
         if os.path.exists(mp3_path):
-            print("✅ Attempt 1 berhasil")
+            print("✅ Download & Konversi ke MP3 sukses.")
             return mp3_path
 
-        found = _find_downloaded_file(output_path, [""])
-        if found:
-            return _convert_to_mp3(found, mp3_path)
+        # Prosedur mitigasi penamaan file sisa temporary
+        for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
+            fp = f"{output_path}._tmp.{ext}"
+            if os.path.exists(fp):
+                if ext == "mp3":
+                    os.rename(fp, mp3_path)
+                    return mp3_path
+                return _convert_to_mp3(fp, mp3_path)
 
     except Exception as e:
-        print(f"⚠️ Attempt 1 gagal: {e}")
+        print(f"⚠️ Proses download gagal: {e}")
 
-    print("🔄 Attempt 2: ios client...")
-    try:
-        opts = get_ydl_opts({
-            "outtmpl": output_path + "_a2.%(ext)s",
-            "format":  "ba/ba*/best",
-            "extractor_args": {
-                "youtube": {"player_client": ["ios"]}
-            },
-        })
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
-
-        found = _find_downloaded_file(output_path, ["_a2"])
-        if found:
-            if found.endswith(".mp3"):
-                return found
-            return _convert_to_mp3(found, mp3_path)
-
-    except Exception as e:
-        print(f"⚠️ Attempt 2 gagal: {e}")
-
-    print("🔄 Attempt 3: last resort combo mobile...")
-    try:
-        opts = get_ydl_opts({
-            "outtmpl": output_path + "_a3.%(ext)s",
-            "format":  "ba/ba*/best",
-            "extractor_args": {
-                "youtube": {"player_client": ["android", "ios"]}
-            },
-        })
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
-
-        found = _find_downloaded_file(output_path, ["_a3"])
-        if found:
-            if found.endswith(".mp3"):
-                return found
-            return _convert_to_mp3(found, mp3_path)
-
-    except Exception as e:
-        print(f"⚠️ Attempt 3 gagal: {e}")
-
-    print("🔄 Attempt 4: global hybrid fallback...")
-    try:
-        opts = get_ydl_opts({
-            "outtmpl": output_path + "_a4.%(ext)s",
-            "format":  "ba/ba*/best",
-            "extractor_args": {
-                "youtube": {"player_client": ["android", "ios", "web", "mweb"]}
-            },
-        })
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
-
-        found = _find_downloaded_file(output_path, ["_a4"])
-        if found:
-            if found.endswith(".mp3"):
-                return found
-            return _convert_to_mp3(found, mp3_path)
-
-    except Exception as e:
-        print(f"⚠️ Attempt 4 gagal: {e}")
-
-    raise Exception("Semua metode download gagal akibat blokir IP. Sediakan cookies.txt agar lolos permanen.")
+    raise Exception("Seluruh kombinasi stream audio diblokir YouTube. Silakan perbarui versi yt-dlp atau sediakan cookies.txt!")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
