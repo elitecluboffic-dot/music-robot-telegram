@@ -1,5 +1,5 @@
-pyrogram==2.0.106
+aiohttp
+hydrogram
 TgCrypto
 yt-dlp
 python-dotenv
-aiohttp
