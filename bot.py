@@ -598,7 +598,20 @@ async def main():
     print(f"✅ Health check port {port}")
     print("✅ Bot siap!")
 
-    await bot.run_until_disconnected()
+    # FIX PERSISTENT TIMESTAMP LOOP: Bungkus run_until_disconnected agar ga crash saat update macet
+    while True:
+        try:
+            await bot.run_until_disconnected()
+        except (FloodWaitError, asyncio.CancelledError):
+            break
+        except Exception as e:
+            if "PersistentTimestampOutdatedError" in str(e) or "timestamp" in str(e).lower():
+                print("⚠️ Telethon Warning: Mengabaikan timestamp outdated internal Telegram, bot lanjut jalan...")
+                await asyncio.sleep(2)
+                continue
+            else:
+                print(f"❌ Unhandled loop error: {e}")
+                await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
