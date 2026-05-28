@@ -9,7 +9,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir --pre \
     "ntgcalls==2.2.1b3" \
     "git+https://github.com/pytgcalls/pytgcalls.git" \
-    "pyrofork" \
+    "hydrogram" \
     TgCrypto \
     yt-dlp \
     python-dotenv
