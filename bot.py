@@ -47,7 +47,7 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 🔥 FIX INTERNAL SESSION: Hapus semua sisa session lama biar gak kena invalid nonce hash
+# Hapus semua sisa session lama biar gak kena invalid nonce hash
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     try:
         os.remove(f)
@@ -150,13 +150,13 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 12,  
-        "format":         "best/highest",  # 🔥 FIX NUKLIR: Ambil format standar apa saja agar proxy luar negeri tidak error format
+        # 🔥 FIX ULTIMATE: Format dihapus total agar yt-dlp mengambil apa saja yang dikasih YouTube tanpa error format
         "noplaylist":      True,
         "ignoreerrors":    True,
         "proxy":          get_dynamic_free_proxy(),  
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"],
+                "player_client": ["ios", "android", "mweb", "web"],
             }
         },
         "postprocessors": [{
@@ -192,7 +192,6 @@ def get_ydl_opts(extra=None):
 def search_and_get_info(query: str) -> dict:
     last_error = None
     
-    # 🔥 FIX AUTO-RETRY LOOP: Jika proxy timeout pas nyari info lagu, otomatis ganti proxy baru sampai 5 kali
     for run in range(1, 6):
         proxy_current = get_dynamic_free_proxy()
         print(f"🔍 Mencari info lagu (Percobaan {run}/5) menggunakan proxy: {proxy_current}")
@@ -206,10 +205,10 @@ def search_and_get_info(query: str) -> dict:
             "ignoreerrors":    False,
             "socket_timeout": 12, 
             "proxy":          proxy_current,  
-            "format":         "best/highest",  # 🔥 SAMA: Paksa format universal
+            # 🔥 FIX ULTIMATE: Parameter format di sini juga dihapus total
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "ios", "mweb", "web"],
+                    "player_client": ["ios", "android", "mweb", "web"],
                 }
             },
         }
@@ -350,14 +349,6 @@ async def play_next(chat_id: int):
         await play_next(chat_id) 
 
 
-async def on_stream_end_handler(client, update):
-    if not isinstance(update, StreamEnded):
-        return
-    chat_id = update.chat_id
-    cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-    await play_next(chat_id)
-
-
 # ─── REGISTER HANDLERS SYSTEM ───────────────────────────────────
 
 def register_handlers(tg_bot):
@@ -466,6 +457,14 @@ def register_handlers(tg_bot):
             await play_next(chat_id)
 
 
+async def on_stream_end_handler(client, update):
+    if not isinstance(update, StreamEnded):
+        return
+    chat_id = update.chat_id
+    cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
+    await play_next(chat_id)
+
+
 # ─── MAIN ────────────────────────────────────────────────────────
 
 async def main():
@@ -481,8 +480,6 @@ async def main():
 
     VISITOR_DATA = generate_visitor_data_lokal()
     bot   = TelegramClient("bot_session", API_ID, API_HASH)
-    
-    # Membuka sesi baru secara bersih
     user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
     calls = PyTgCalls(user)
 
