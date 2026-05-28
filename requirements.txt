@@ -1,8 +1,13 @@
-# Tidak dipakai langsung oleh Railway (install via Dockerfile)
-# Tapi disimpan untuk referensi / local dev
-hydrogram
+# Library Utama Telegram Client (Wajib ada untuk bot.py kamu)
+telethon
+TgCrypto
+
+# Library Voice Calls (Menggunakan backend PyAv)
 pytgcalls[pyav]
+
+# Library Download & Stream (Selalu gunakan versi paling segar)
 yt-dlp
+
+# Library Pendukung & HTTP Server
 python-dotenv
 aiohttp
-TgCrypto
