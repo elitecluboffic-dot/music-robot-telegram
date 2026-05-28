@@ -94,7 +94,7 @@ def auto_generate_po_token():
 
         # Jalankan dengan memory limit 256MB untuk hindari OOM
         result = subprocess.run(
-            ["node", "--max-old-space-size=256", bin_path],
+            ["node", "--max-old-space-size=512", bin_path],
             capture_output=True, text=True, timeout=90
         )
 
