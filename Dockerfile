@@ -7,19 +7,16 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 RUN pip install --no-cache-dir \
-    "hydrogram[fast]" \
-    "TgCrypto" \
+    "telethon" \
     "aiohttp" \
     "yt-dlp" \
     "python-dotenv"
 
 RUN pip install --no-cache-dir --pre \
-    "ntgcalls==2.2.1b3"
-
-RUN pip install --no-cache-dir --pre \
+    "ntgcalls==2.2.1b3" \
     "git+https://github.com/pytgcalls/pytgcalls.git"
 
-RUN python -c "from hydrogram import Client; print('Hydrogram OK')"
+RUN python -c "from telethon import TelegramClient; print('Telethon OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
 
 COPY . .
