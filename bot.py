@@ -11,7 +11,7 @@ from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from hydrogram.errors import FloodWait
 
-from pytgcalls import PyTgCalls, idle
+from pytgcalls import PyTgCalls
 from pytgcalls import filters as tg_filters
 from pytgcalls.types import MediaStream, StreamEnded
 from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
@@ -468,7 +468,31 @@ async def main():
     print(f"✅ Health check running on port {port}")
     print("✅ Bot siap! Kirim /start ke bot kamu di Telegram.")
 
-    await idle()
+    # Keep alive — jangan pakai idle() dari pytgcalls, block polling Hydrogram
+    import signal
+    stop_event = asyncio.Event()
+
+    def _stop():
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            asyncio.get_event_loop().add_signal_handler(sig, _stop)
+        except Exception:
+            pass
+
+    print("✅ Polling aktif, menunggu pesan masuk...")
+    await stop_event.wait()
+
+    print("🛑 Shutting down...")
+    try:
+        await calls.stop()
+    except Exception:
+        pass
+    try:
+        await app.stop()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
