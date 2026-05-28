@@ -12,9 +12,11 @@ RUN pip install --no-cache-dir --pre \
     "hydrogram" \
     TgCrypto \
     yt-dlp \
-    python-dotenv
+    python-dotenv \
+    aiohttp
 
-RUN python -c "from pytgcalls import PyTgCalls; print('OK')"
+RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
 
 COPY . .
-CMD ["python", "bot.py"]
+
+CMD ["python", "-u", "bot.py"]
