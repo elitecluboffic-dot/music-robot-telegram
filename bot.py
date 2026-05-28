@@ -15,6 +15,7 @@ if not TOKEN:
     raise ValueError("BOT_TOKEN tidak ditemukan! Cek file .env atau environment variable.")
 
 DOWNLOAD_DIR = "downloads"
+COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # ─── Queue per chat ───────────────────────────────────────────────
@@ -33,6 +34,7 @@ def search_and_get_info(query: str) -> dict:
         "noplaylist": True,
         "quiet": True,
         "default_search": "ytsearch1",
+        "cookiefile": COOKIES_FILE,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(query, download=False)
@@ -51,6 +53,7 @@ def download_audio(url: str, filename: str) -> str:
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_path + ".%(ext)s",
+        "cookiefile": COOKIES_FILE,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
