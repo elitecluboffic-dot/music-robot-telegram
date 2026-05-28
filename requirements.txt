@@ -1,5 +1,8 @@
+# Tidak dipakai langsung oleh Railway (install via Dockerfile)
+# Tapi disimpan untuk referensi / local dev
 hydrogram
 pytgcalls[pyav]
 yt-dlp
 python-dotenv
 aiohttp
+TgCrypto
