@@ -101,11 +101,11 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":         "bestaudio/best",  # 🔥 FIX UTAMA: Standar ekstraksi stream audio paling aman
+        "format":         "ba/ba*/best",  # 🔥 FIX UTAMA: Fallback otomatis dari audio murni ke stream video lengkap
         "noplaylist":      True,
         "extractor_args": {
             "youtube": {
-                # 🔥 FIX UTAMA: Penggabungan client agar yt-dlp melakukan rotasi fallback internal otomatis
+                # 🔥 Penggabungan client agar yt-dlp melakukan rotasi bypass internal otomatis
                 "player_client": ["android", "ios", "mweb", "web"],
             }
         },
@@ -148,7 +148,7 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
-        "format":         "bestaudio/best",
+        "format":         "ba/ba*/best",  # 🔥 FIX UTAMA: Samakan format fleksibel agar pencarian tidak crash/kosong
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb"],
