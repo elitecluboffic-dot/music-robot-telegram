@@ -1,5 +1,6 @@
 import os
 import glob
+import json
 import asyncio
 import subprocess
 import aiohttp
@@ -12,7 +13,6 @@ from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
 
 from pytgcalls import PyTgCalls
-from pytgcalls import filters as tg_filters
 from pytgcalls.types import MediaStream, StreamEnded
 
 load_dotenv()
@@ -20,8 +20,9 @@ load_dotenv()
 API_ID       = int(os.getenv("API_ID", 0))
 API_HASH     = os.getenv("API_HASH", "")
 BOT_TOKEN    = os.getenv("BOT_TOKEN", "")
-USER_SESSION = os.getenv("USER_SESSION", "")  # dari gen_session.py
-PO_TOKEN     = os.getenv("PO_TOKEN", "")      # dari https://github.com/YunzheZJU/youtube-po-token-generator
+USER_SESSION = os.getenv("USER_SESSION", "")
+PO_TOKEN     = os.getenv("PO_TOKEN", "")
+VISITOR_DATA = os.getenv("VISITOR_DATA", "")
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
@@ -33,7 +34,7 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Hapus session bot lama, tapi JANGAN hapus user_session
+# Hapus session bot lama
 for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journal"):
     try:
         os.remove(f)
@@ -42,18 +43,13 @@ for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journ
 
 # ─── CLIENTS ─────────────────────────────────────────────────────
 
-# Bot client — hanya untuk terima/kirim pesan
-bot = TelegramClient("bot_session", API_ID, API_HASH)
-
-# Userbot client — yang masuk ke Voice Chat
-user = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
-
-# PyTgCalls pakai userbot, bukan bot!
+bot   = TelegramClient("bot_session", API_ID, API_HASH)
+user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
 calls = PyTgCalls(user)
 
 # ─── STATE ───────────────────────────────────────────────────────
 
-queues: dict = {}
+queues: dict      = {}
 now_playing: dict = {}
 
 def get_queue(chat_id):
@@ -75,9 +71,40 @@ def cleanup_file(fp):
         except Exception:
             pass
 
+# ─── PO TOKEN ────────────────────────────────────────────────────
+
+def auto_generate_po_token():
+    """Generate PO Token via youtube-po-token-generator (Node.js)"""
+    try:
+        r = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
+        if r.returncode != 0:
+            print("⚠️ Node.js tidak tersedia, skip PO Token")
+            return "", ""
+
+        result = subprocess.run(
+            ["youtube-po-token-generator"],
+            capture_output=True, text=True, timeout=60
+        )
+
+        if result.returncode != 0:
+            print(f"⚠️ PO Token generator error: {result.stderr.strip()}")
+            return "", ""
+
+        data = json.loads(result.stdout.strip())
+        token   = data.get("poToken", "")
+        visitor = data.get("visitorData", "")
+
+        if token:
+            print(f"✅ PO Token: {token[:20]}...")
+        return token, visitor
+
+    except Exception as e:
+        print(f"⚠️ Gagal generate PO Token: {e}")
+        return "", ""
+
 # ─── YT-DLP ──────────────────────────────────────────────────────
 
-_JS_KEY = None
+_JS_KEY  = None
 _JS_PATH = None
 
 def get_ydl_opts(extra=None):
@@ -93,16 +120,14 @@ def get_ydl_opts(extra=None):
                 pass
 
     opts = {
-        "quiet": True,
-        "no_warnings": True,
+        "quiet":          True,
+        "no_warnings":    True,
         "socket_timeout": 30,
-        # FIX: pakai "bestaudio/best" supaya fleksibel, tidak strict ke ext tertentu
-        "format": "bestaudio/best",
-        "noplaylist": True,
+        "format":         "bestaudio/best",
+        "noplaylist":     True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "mweb", "web", "tv_embedded"],
-                "player_skip": ["webpage", "configs"],
+                "player_client": ["ios", "mweb"],
             }
         },
         "http_headers": {
@@ -117,8 +142,10 @@ def get_ydl_opts(extra=None):
         opts["cookiefile"] = COOKIES_FILE
 
     if PO_TOKEN:
-        opts["extractor_args"]["youtube"]["po_token"] = [f"web+{PO_TOKEN}"]
+        opts["extractor_args"]["youtube"]["po_token"]      = [f"web+{PO_TOKEN}"]
         opts["extractor_args"]["youtube"]["player_client"] = ["web"]
+        if VISITOR_DATA:
+            opts["extractor_args"]["youtube"]["visitor_data"] = [VISITOR_DATA]
 
     if _JS_KEY:
         opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
@@ -129,11 +156,9 @@ def get_ydl_opts(extra=None):
 
 
 def search_and_get_info(query: str) -> dict:
-    # FIX: pakai format=None saat fetch info saja, biar tidak validasi format
     info_opts = get_ydl_opts({
         "default_search": "ytsearch1",
-        "format": None,          # jangan filter format saat cuma ambil metadata
-        "skip_download": True,
+        "skip_download":  True,
     })
     with yt_dlp.YoutubeDL(info_opts) as ydl:
         info = ydl.extract_info(query, download=False)
@@ -151,60 +176,75 @@ def search_and_get_info(query: str) -> dict:
 
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
+    mp3_path    = output_path + ".mp3"
 
-    # Coba pertama: download + convert langsung ke mp3
+    # Attempt 1: download + convert langsung ke mp3
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
-            "format": "bestaudio/best",  # FIX: fleksibel
             "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "128",
+                "key":             "FFmpegExtractAudio",
+                "preferredcodec":  "mp3",
+                "preferredquality":"128",
             }],
         })
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
-        # FIX: cek berbagai kemungkinan ekstensi hasil download
-        for ext in ["mp3", "m4a", "webm", "opus", "ogg"]:
+        if os.path.exists(mp3_path):
+            return mp3_path
+
+        # Kalau mp3 belum ada, cek ekstensi lain lalu convert
+        for ext in ["m4a", "webm", "opus", "ogg", "mp4"]:
             p = output_path + f".{ext}"
             if os.path.exists(p):
-                return p
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", p,
+                     "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", mp3_path],
+                    check=True, capture_output=True,
+                )
+                cleanup_file(p)
+                return mp3_path
 
     except Exception as e:
-        print(f"⚠️ Download pertama gagal: {e}")
+        print(f"⚠️ Attempt 1 gagal: {e}")
 
-    # Fallback: download format apapun yang tersedia, lalu convert manual
-    print("🔄 Mencoba fallback download...")
+    # Attempt 2: format fallback ID spesifik
+    print("🔄 Attempt 2: fallback format 140/251/250/249...")
     try:
-        fallback_opts = get_ydl_opts({
+        opts = get_ydl_opts({
             "outtmpl": output_path + "_raw.%(ext)s",
-            "format": "bestaudio/best",  # FIX: jangan strict ke mp4
+            "format":  "140/251/250/249/bestaudio/best",
         })
-        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            ext = info.get("ext", "webm")
+            ext  = info.get("ext", "m4a")
 
         raw_path = output_path + f"_raw.{ext}"
-        mp3_path = output_path + ".mp3"
+
+        # Cari file raw kalau ekstensi beda
+        if not os.path.exists(raw_path):
+            for ext_try in ["m4a", "webm", "opus", "ogg", "mp4"]:
+                raw_try = output_path + f"_raw.{ext_try}"
+                if os.path.exists(raw_try):
+                    raw_path = raw_try
+                    break
 
         if not os.path.exists(raw_path):
-            raise FileNotFoundError(f"File tidak ditemukan: {raw_path}")
+            raise FileNotFoundError("File raw tidak ditemukan setelah download")
 
-        # Convert ke mp3 pakai ffmpeg
         subprocess.run(
             ["ffmpeg", "-y", "-i", raw_path,
              "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", mp3_path],
-            check=True,
-            capture_output=True,
+            check=True, capture_output=True,
         )
         cleanup_file(raw_path)
         return mp3_path
 
     except Exception as e:
-        print(f"⚠️ Fallback download gagal: {e}")
-        raise Exception(f"Gagal download audio: {e}")
+        print(f"⚠️ Attempt 2 gagal: {e}")
+
+    raise Exception("Semua metode download gagal. Cek cookies atau PO_TOKEN.")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
@@ -293,7 +333,7 @@ async def cmd_play(event):
         return
 
     chat_id = event.chat_id
-    status = await event.respond(f"🔍 Mencari **{query}**...")
+    status  = await event.respond(f"🔍 Mencari **{query}**...")
 
     try:
         info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
@@ -343,7 +383,7 @@ async def cmd_skip(event):
 @bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
 async def cmd_queue(event):
     chat_id = event.chat_id
-    queue = get_queue(chat_id)
+    queue   = get_queue(chat_id)
 
     if not queue and chat_id not in now_playing:
         await event.respond("📋 Antrian kosong.")
@@ -351,7 +391,7 @@ async def cmd_queue(event):
 
     text = "📋 **Antrian**\n\n"
     if chat_id in now_playing:
-        np = now_playing[chat_id]
+        np    = now_playing[chat_id]
         text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
     for i, t in enumerate(queue, 1):
         text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
@@ -361,9 +401,7 @@ async def cmd_queue(event):
 
 @bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
 async def cmd_stop(event):
-    chat_id = event.chat_id
-    print(f"✅ /stop @ {chat_id}")
-
+    chat_id       = event.chat_id
     queues[chat_id] = []
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
 
@@ -416,7 +454,7 @@ async def cb_handler(event):
 
     elif data.startswith("queue_"):
         chat_id = int(data.split("_")[1])
-        queue = get_queue(chat_id)
+        queue   = get_queue(chat_id)
         if not queue:
             await event.answer("Antrian kosong.", alert=True)
         else:
@@ -424,7 +462,6 @@ async def cb_handler(event):
             await event.answer(f"📋 Antrian:\n{text[:200]}", alert=True)
 
 
-# Debug: tangkap semua pesan
 @bot.on(events.NewMessage)
 async def catch_all(event):
     print(f"📨 chat={event.chat_id} text={event.text!r}")
@@ -433,6 +470,8 @@ async def catch_all(event):
 # ─── MAIN ────────────────────────────────────────────────────────
 
 async def main():
+    global PO_TOKEN, VISITOR_DATA
+
     print("🚀 Starting bot...")
 
     # Delete webhook
@@ -445,7 +484,22 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # Login userbot (akun biasa untuk Voice Chat)
+    # Auto-generate PO Token kalau tidak ada di env
+    if not PO_TOKEN:
+        print("🔄 Generating PO Token...")
+        po, vd = await asyncio.get_event_loop().run_in_executor(
+            None, auto_generate_po_token
+        )
+        if po:
+            PO_TOKEN     = po
+            VISITOR_DATA = vd
+            print("✅ PO Token siap!")
+        else:
+            print("⚠️ Lanjut tanpa PO Token")
+    else:
+        print(f"✅ PO Token dari env: {PO_TOKEN[:20]}...")
+
+    # Login userbot
     print("👤 Login userbot via StringSession...")
     try:
         await user.start()
@@ -455,7 +509,7 @@ async def main():
         print(f"❌ Userbot login error: {e}")
         raise
 
-    # Login bot (untuk terima/kirim pesan)
+    # Login bot
     for attempt in range(10):
         try:
             await bot.start(bot_token=BOT_TOKEN)
@@ -472,7 +526,7 @@ async def main():
     else:
         raise Exception("Gagal login bot 10x")
 
-    # Start PyTgCalls (pakai userbot)
+    # Start PyTgCalls
     try:
         await calls.start()
         print("✅ PyTgCalls started (userbot)")
