@@ -1,4 +1,5 @@
 import os
+import glob
 import asyncio
 import subprocess
 import aiohttp
@@ -31,9 +32,17 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 print("🚀 [2/5] Dirs created...")
 
+# ─── Hapus session lama yang conflict ────────────────────────────
+for f in glob.glob("*.session") + glob.glob("*.session-journal"):
+    try:
+        os.remove(f)
+        print(f"🗑 Hapus session lama: {f}")
+    except Exception:
+        pass
+
 # ─── Hydrogram bot client ─────────────────────────────────────────
 app = Client(
-    "music_bot",
+    "bimrobot_session",          # nama session baru, bukan "music_bot"
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
@@ -62,11 +71,11 @@ def find_runtime():
                 capture_output=True, text=True, timeout=3
             )
             if r.returncode == 0:
-                print(f"✅ JS Runtime ditemukan: {binary}")
+                print(f"✅ JS Runtime: {binary}")
                 return binary, binary
         except Exception:
             pass
-    print("⚠️  JS Runtime tidak ditemukan. yt-dlp tetap berjalan tanpa JS runtime.")
+    print("⚠️  JS Runtime tidak ditemukan.")
     return None, None
 
 _JS_RUNTIME_KEY  = None
@@ -144,7 +153,7 @@ def fmt_duration(seconds) -> str:
     h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
-# ─── Play next di voice chat ──────────────────────────────────────
+# ─── Play next ───────────────────────────────────────────────────
 async def play_next(chat_id: int):
     queue = get_queue(chat_id)
     if not queue:
@@ -180,12 +189,14 @@ async def play_next(chat_id: int):
         )
         await calls.play(chat_id, MediaStream(file_path))
         now_playing[chat_id]["file_path"] = file_path
+        print(f"▶️ Playing: {track['title']} di chat {chat_id}")
 
     except Exception as e:
+        print(f"❌ Error play: {e}")
         await app.send_message(chat_id, f"❌ Error memutar lagu: {e}")
         await play_next(chat_id)
 
-# ─── Callback saat lagu selesai ──────────────────────────────────
+# ─── Stream selesai ──────────────────────────────────────────────
 @calls.on_update(tg_filters.stream_end)
 async def on_stream_end(client, update: StreamEnded):
     chat_id = update.chat_id
@@ -200,7 +211,8 @@ async def on_stream_end(client, update: StreamEnded):
 
 # ─── /start ──────────────────────────────────────────────────────
 @app.on_message(filters.command("start"))
-async def start(_, msg: Message):
+async def cmd_start(_, msg: Message):
+    print(f"📩 /start dari {msg.from_user.id if msg.from_user else '?'}")
     await msg.reply_text(
         "🎵 *Music Bot — Voice Chat*\n\n"
         "Kirim perintah berikut di *grup* dengan Voice Chat aktif:\n\n"
@@ -210,18 +222,20 @@ async def start(_, msg: Message):
         "🗑 `/clear` — hapus antrian\n"
         "🎧 `/nowplaying` — info lagu sekarang\n"
         "⏹ `/stop` — stop & keluar voice chat\n\n"
-        "Contoh: `/play shape of you ed sheeran`\n\n"
+        "Contoh: `/play despacito`\n\n"
         "⚠️ *Bot harus sudah join grup dan ada Voice Chat aktif.*",
         parse_mode="markdown",
     )
 
 # ─── /play ───────────────────────────────────────────────────────
 @app.on_message(filters.command("play") & filters.group)
-async def play_command(_, msg: Message):
+async def cmd_play(_, msg: Message):
     query = " ".join(msg.command[1:])
+    print(f"📩 /play '{query}' dari chat {msg.chat.id}")
+
     if not query:
         await msg.reply_text(
-            "❗ Gunakan: `/play <judul lagu>`\nContoh: `/play shape of you`",
+            "❗ Gunakan: `/play <judul lagu>`\nContoh: `/play despacito`",
             parse_mode="markdown"
         )
         return
@@ -233,7 +247,9 @@ async def play_command(_, msg: Message):
         info = await asyncio.get_event_loop().run_in_executor(
             None, search_and_get_info, query
         )
+        print(f"✅ Ditemukan: {info['title']}")
     except Exception as e:
+        print(f"❌ Gagal cari: {e}")
         await status_msg.edit_text(f"❌ Gagal mencari lagu: {e}")
         return
 
@@ -260,7 +276,7 @@ async def play_command(_, msg: Message):
 
 # ─── /skip ───────────────────────────────────────────────────────
 @app.on_message(filters.command("skip") & filters.group)
-async def skip_command(_, msg: Message):
+async def cmd_skip(_, msg: Message):
     chat_id = msg.chat.id
     if chat_id not in now_playing:
         await msg.reply_text("❗ Tidak ada lagu yang sedang diputar.")
@@ -281,26 +297,23 @@ async def skip_command(_, msg: Message):
 
 # ─── /queue ──────────────────────────────────────────────────────
 @app.on_message(filters.command("queue") & filters.group)
-async def queue_command(_, msg: Message):
+async def cmd_queue(_, msg: Message):
     chat_id = msg.chat.id
     queue = get_queue(chat_id)
-
     if not queue and chat_id not in now_playing:
         await msg.reply_text("📋 Antrian kosong.")
         return
-
     text = "📋 *Antrian Lagu*\n\n"
     if chat_id in now_playing:
         np = now_playing[chat_id]
         text += f"▶️ *{np['title']}* — {fmt_duration(np['duration'])}\n\n"
     for i, track in enumerate(queue, 1):
         text += f"{i}. {track['title']} — {fmt_duration(track['duration'])}\n"
-
     await msg.reply_text(text, parse_mode="markdown")
 
 # ─── /clear ──────────────────────────────────────────────────────
 @app.on_message(filters.command("clear") & filters.group)
-async def clear_command(_, msg: Message):
+async def cmd_clear(_, msg: Message):
     chat_id = msg.chat.id
     queues[chat_id] = []
     now_playing.pop(chat_id, None)
@@ -312,7 +325,7 @@ async def clear_command(_, msg: Message):
 
 # ─── /stop ───────────────────────────────────────────────────────
 @app.on_message(filters.command("stop") & filters.group)
-async def stop_command(_, msg: Message):
+async def cmd_stop(_, msg: Message):
     chat_id = msg.chat.id
     queues[chat_id] = []
     now_playing.pop(chat_id, None)
@@ -324,7 +337,7 @@ async def stop_command(_, msg: Message):
 
 # ─── /nowplaying ─────────────────────────────────────────────────
 @app.on_message(filters.command("nowplaying") & filters.group)
-async def nowplaying_command(_, msg: Message):
+async def cmd_nowplaying(_, msg: Message):
     chat_id = msg.chat.id
     if chat_id not in now_playing:
         await msg.reply_text("❗ Tidak ada lagu yang sedang diputar.")
@@ -339,7 +352,7 @@ async def nowplaying_command(_, msg: Message):
         parse_mode="markdown",
     )
 
-# ─── Callback buttons ─────────────────────────────────────────────
+# ─── Callback buttons ────────────────────────────────────────────
 @app.on_callback_query()
 async def callback_handler(_, cq):
     data = cq.data
@@ -373,27 +386,24 @@ async def callback_handler(_, cq):
             text = "\n".join([f"{i+1}. {t['title']}" for i, t in enumerate(queue)])
             await cq.answer(f"📋 Antrian:\n{text}", show_alert=True)
 
-# ─── Main ─────────────────────────────────────────────────────────
+# ─── Main ────────────────────────────────────────────────────────
 async def main():
     print("🚀 [5/5] Starting bot...")
 
-    # ─── HAPUS WEBHOOK dulu biar bot pakai polling, bukan webhook ──
+    # Hapus webhook → paksa polling
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
             async with session.get(url) as resp:
                 data = await resp.json()
-                if data.get("result"):
-                    print("✅ Webhook dihapus, beralih ke polling")
-                else:
-                    print(f"⚠️  deleteWebhook response: {data}")
+                print(f"🔧 deleteWebhook: {data.get('description', data)}")
     except Exception as e:
-        print(f"⚠️  Gagal hapus webhook (lanjut): {e}")
-    # ───────────────────────────────────────────────────────────────
+        print(f"⚠️  Gagal hapus webhook: {e}")
 
     try:
         await app.start()
-        print("✅ Hydrogram client started")
+        me = await app.get_me()
+        print(f"✅ Bot login sebagai @{me.username} (id={me.id})")
     except Exception as e:
         print(f"❌ Gagal start Hydrogram: {e}")
         raise
@@ -405,7 +415,7 @@ async def main():
         print(f"❌ Gagal start PyTgCalls: {e}")
         raise
 
-    # ─── Health check server biar Railway tidak kill container ─────
+    # Health check
     async def health(request):
         return web.Response(text="OK")
 
@@ -416,7 +426,7 @@ async def main():
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"✅ Health check server running on port {port}")
+    print(f"✅ Health check running on port {port}")
     print("✅ Bot siap! Kirim /start ke bot kamu di Telegram.")
 
     await idle()
