@@ -11,3 +11,6 @@ yt-dlp
 # Library Pendukung & HTTP Server
 python-dotenv
 aiohttp
+
+# Library untuk Hit API Proxy Geonode & GitHub Fallback
+requests
