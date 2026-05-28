@@ -9,9 +9,9 @@ from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from hydrogram.errors import UserAlreadyParticipant, ChatAdminRequired
 
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream
+from pytgcalls import filters as tg_filters
+from pytgcalls.types import MediaStream, StreamEnded
 from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
-
 
 load_dotenv()
 
@@ -26,7 +26,7 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ─── Pyrogram bot client ──────────────────────────────────────────
+# ─── Hydrogram bot client ─────────────────────────────────────────
 app = Client(
     "music_bot",
     api_id=API_ID,
@@ -38,7 +38,7 @@ app = Client(
 calls = PyTgCalls(app)
 
 # ─── Queue & state ───────────────────────────────────────────────
-queues    = {}
+queues      = {}
 now_playing = {}
 
 def get_queue(chat_id):
@@ -174,19 +174,16 @@ async def play_next(chat_id: int):
             MediaStream(file_path),
         )
 
-        # Hapus file setelah selesai (pantau via stream_end callback)
         now_playing[chat_id]["file_path"] = file_path
 
     except Exception as e:
         await app.send_message(chat_id, f"❌ Error: {e}")
-        # Coba lanjut ke lagu berikutnya
         await play_next(chat_id)
 
 # ─── Callback saat lagu selesai ──────────────────────────────────
-@calls.on_stream_end()
-async def on_stream_end(_, update):
+@calls.on_update(tg_filters.stream_end)
+async def on_stream_end(client, update: StreamEnded):
     chat_id = update.chat_id
-    # Hapus file lama
     track = now_playing.get(chat_id, {})
     fp = track.get("file_path")
     if fp and os.path.exists(fp):
@@ -246,7 +243,6 @@ async def play_command(_, msg: Message):
         reply_markup=keyboard,
     )
 
-    # Kalau tidak ada lagu yang sedang main, langsung play
     if chat_id not in now_playing:
         await play_next(chat_id)
 
