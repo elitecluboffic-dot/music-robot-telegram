@@ -6,16 +6,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# hydrogram + pytgcalls dev (keduanya harus kompatibel)
 RUN pip install --no-cache-dir \
     "hydrogram[fast]" \
     "TgCrypto" \
     "aiohttp" \
     "yt-dlp" \
     "python-dotenv" \
-    && pip install --no-cache-dir --pre \
     "ntgcalls==2.2.1b3" \
-    "git+https://github.com/pytgcalls/pytgcalls.git@v2.2.12"
+    "pytgcalls==2.2.12"
 
 RUN python -c "from hydrogram import Client; print('Hydrogram OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
