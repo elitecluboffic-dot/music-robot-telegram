@@ -9,6 +9,7 @@ from aiohttp import web
 
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from hydrogram.errors import FloodWait
 
 from pytgcalls import PyTgCalls, idle
 from pytgcalls import filters as tg_filters
@@ -42,7 +43,7 @@ for f in glob.glob("*.session") + glob.glob("*.session-journal"):
 
 # ─── Hydrogram bot client ─────────────────────────────────────────
 app = Client(
-    "bimrobot_session",          # nama session baru, bukan "music_bot"
+    "bimrobot_session",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
@@ -386,6 +387,24 @@ async def callback_handler(_, cq):
             text = "\n".join([f"{i+1}. {t['title']}" for i, t in enumerate(queue)])
             await cq.answer(f"📋 Antrian:\n{text}", show_alert=True)
 
+# ─── Start bot dengan retry FloodWait ────────────────────────────
+async def start_bot_with_retry():
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            await app.start()
+            me = await app.get_me()
+            print(f"✅ Bot login sebagai @{me.username} (id={me.id})")
+            return
+        except FloodWait as e:
+            wait = e.value + 5  # tambah 5 detik buffer
+            print(f"⏳ FloodWait: nunggu {wait} detik... (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(wait)
+        except Exception as e:
+            print(f"❌ Gagal start Hydrogram: {e}")
+            raise
+    raise Exception("❌ Gagal login setelah 3x retry FloodWait")
+
 # ─── Main ────────────────────────────────────────────────────────
 async def main():
     print("🚀 [5/5] Starting bot...")
@@ -400,13 +419,8 @@ async def main():
     except Exception as e:
         print(f"⚠️  Gagal hapus webhook: {e}")
 
-    try:
-        await app.start()
-        me = await app.get_me()
-        print(f"✅ Bot login sebagai @{me.username} (id={me.id})")
-    except Exception as e:
-        print(f"❌ Gagal start Hydrogram: {e}")
-        raise
+    # Start bot dengan FloodWait retry otomatis
+    await start_bot_with_retry()
 
     try:
         await calls.start()
@@ -415,7 +429,7 @@ async def main():
         print(f"❌ Gagal start PyTgCalls: {e}")
         raise
 
-    # Health check
+    # Health check server
     async def health(request):
         return web.Response(text="OK")
 
