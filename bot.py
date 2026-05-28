@@ -21,62 +21,36 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # ─── Cari JS runtime otomatis ────────────────────────────────────
 def find_runtime():
-    # Coba node/deno langsung via PATH dulu
-    for name, prefix in [("node", "nodejs"), ("nodejs", "nodejs"), ("deno", "deno")]:
+    for name in ["node", "nodejs", "deno"]:
         try:
             r = subprocess.run([name, "--version"], capture_output=True, text=True, timeout=5)
             if r.returncode == 0:
                 w = subprocess.run(["which", name], capture_output=True, text=True)
                 path = w.stdout.strip() if w.returncode == 0 else name
+                prefix = "deno" if name == "deno" else "nodejs"
                 print(f"✅ {name} ditemukan: {path}")
-                return f"{prefix}:{path}"
+                return prefix, path
         except Exception:
             pass
 
-    # Cari di seluruh /nix/store (Railway pakai nixpacks)
-    for binary, prefix in [("node", "nodejs"), ("deno", "deno")]:
-        try:
-            r = subprocess.run(
-                ["find", "/nix/store", "-name", binary, "-type", "f"],
-                capture_output=True, text=True, timeout=15
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                candidates = [
-                    p for p in r.stdout.strip().split("\n")
-                    if f"/bin/{binary}" in p
-                ]
-                if candidates:
-                    path = candidates[0]
-                    print(f"✅ {binary} ditemukan di nix store: {path}")
-                    return f"{prefix}:{path}"
-        except Exception:
-            pass
+    try:
+        r = subprocess.run(
+            ["find", "/nix/store", "-name", "node", "-type", "f"],
+            capture_output=True, text=True, timeout=15
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            candidates = [p for p in r.stdout.strip().split("\n") if "/bin/node" in p]
+            if candidates:
+                print(f"✅ node ditemukan di nix store: {candidates[0]}")
+                return "nodejs", candidates[0]
+    except Exception:
+        pass
 
-    # Cari di /app/.venv dan mise shims
-    for path in [
-        "/mise/shims/node", "/mise/shims/deno",
-        "/app/.venv/bin/node", "/usr/bin/node",
-        "/usr/local/bin/node",
-    ]:
-        if os.path.isfile(path):
-            prefix = "deno" if "deno" in path else "nodejs"
-            print(f"✅ Runtime ditemukan: {path}")
-            return f"{prefix}:{path}"
+    print("⚠️ JS Runtime tidak ditemukan.")
+    return None, None
 
-    print("⚠️ JS Runtime tidak ditemukan, lanjut tanpa JS runtime.")
-    return None
-
-JS_RUNTIME = find_runtime()
-print(f"JS Runtime: {JS_RUNTIME or 'tidak ditemukan'}")
-
-# ─── Queue per chat ───────────────────────────────────────────────
-queues = {}
-now_playing = {}
-
-def get_queue(chat_id):
-    if chat_id not in queues:
-        queues[chat_id] = []
-    return queues[chat_id]
+JS_RUNTIME_TYPE, JS_RUNTIME_PATH = find_runtime()
+print(f"JS Runtime: {JS_RUNTIME_TYPE}:{JS_RUNTIME_PATH}" if JS_RUNTIME_TYPE else "JS Runtime: tidak ditemukan")
 
 # ─── YDL base opts ────────────────────────────────────────────────
 def get_ydl_opts(extra=None):
@@ -89,8 +63,9 @@ def get_ydl_opts(extra=None):
     }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
-    if JS_RUNTIME:
-        opts["js_runtimes"] = JS_RUNTIME
+    # Format baru yt-dlp: dict {runtime: {config}}
+    if JS_RUNTIME_TYPE and JS_RUNTIME_PATH:
+        opts["js_runtimes"] = {JS_RUNTIME_TYPE: {"path": JS_RUNTIME_PATH}}
     if extra:
         opts.update(extra)
     return opts
@@ -224,6 +199,15 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
         await ctx.bot.send_message(chat_id, f"❌ Error saat memutar: {e}")
 
     await play_next(chat_id, update, ctx)
+
+# ─── Queue per chat ───────────────────────────────────────────────
+queues = {}
+now_playing = {}
+
+def get_queue(chat_id):
+    if chat_id not in queues:
+        queues[chat_id] = []
+    return queues[chat_id]
 
 async def skip_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
