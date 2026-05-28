@@ -34,8 +34,7 @@ def get_ydl_opts(extra=None):
         "no_warnings": False,
         "cookiefile": COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
         "socket_timeout": 30,
-        # Format yang tidak butuh JS runtime
-        "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio/best",
+        "format": "bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio",
         "noplaylist": True,
     }
     if extra:
@@ -51,6 +50,8 @@ def search_and_get_info(query: str) -> dict:
         info = ydl.extract_info(query, download=False)
         if "entries" in info:
             info = info["entries"][0]
+        if not info:
+            raise Exception("Lagu tidak ditemukan")
         return {
             "title": info.get("title", "Unknown"),
             "url": info.get("webpage_url"),
@@ -91,7 +92,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/skip — skip lagu sekarang\n"
         "/clear — hapus antrian\n"
         "/nowplaying — info lagu sekarang\n\n"
-        "Atau langsung kirim nama lagu aja!",
+        "Di grup, gunakan /play untuk memutar lagu.",
         parse_mode="Markdown"
     )
 
@@ -223,7 +224,11 @@ async def nowplaying_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+# Handle pesan biasa — HANYA di DM, tidak di grup
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat_type = update.message.chat.type
+    if chat_type in ["group", "supergroup"]:
+        return  # abaikan semua pesan biasa di grup, harus pakai /play
     ctx.args = update.message.text.split()
     await play_command(update, ctx)
 
