@@ -21,90 +21,47 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # ─── Cari JS runtime otomatis ────────────────────────────────────
 def find_runtime():
-    # ── DEBUG: cari tau path deno/node di Railway ──
-    print("=== DEBUG RUNTIME ===")
-    print(f"PATH: {os.environ.get('PATH', 'tidak ada')}")
-
-    for cmd in ["deno", "node"]:
+    # Coba node/deno langsung via PATH dulu
+    for name, prefix in [("node", "nodejs"), ("nodejs", "nodejs"), ("deno", "deno")]:
         try:
-            r = subprocess.run(["which", cmd], capture_output=True, text=True)
-            print(f"which {cmd}: {r.stdout.strip() or 'tidak ada'}")
-        except Exception as e:
-            print(f"which {cmd}: error - {e}")
-
-    try:
-        r = subprocess.run(
-            ["find", "/nix/store", "-name", "deno", "-type", "f"],
-            capture_output=True, text=True, timeout=10
-        )
-        print(f"nix deno: {r.stdout.strip()[:300] or 'tidak ada'}")
-    except Exception as e:
-        print(f"nix deno error: {e}")
-
-    try:
-        r = subprocess.run(
-            ["find", "/nix/store", "-maxdepth", "5", "-name", "node", "-type", "f"],
-            capture_output=True, text=True, timeout=10
-        )
-        lines = [l for l in r.stdout.strip().split("\n") if "bin/node" in l]
-        print(f"nix node: {lines[:3] or 'tidak ada'}")
-    except Exception as e:
-        print(f"nix node error: {e}")
-
-    print("=====================")
-    # ── END DEBUG ──
-
-    # Coba deno langsung
-    for cmd in ["deno", "/root/.deno/bin/deno", "/usr/bin/deno", "/usr/local/bin/deno"]:
-        try:
-            r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run([name, "--version"], capture_output=True, text=True, timeout=5)
             if r.returncode == 0:
-                w = subprocess.run(["which", cmd], capture_output=True, text=True)
-                path = w.stdout.strip() if w.returncode == 0 else cmd
-                print(f"✅ Deno ditemukan: {path}")
-                return f"deno:{path}"
+                w = subprocess.run(["which", name], capture_output=True, text=True)
+                path = w.stdout.strip() if w.returncode == 0 else name
+                print(f"✅ {name} ditemukan: {path}")
+                return f"{prefix}:{path}"
         except Exception:
             pass
 
-    # Coba cari deno di nix store
-    try:
-        r = subprocess.run(
-            ["find", "/nix/store", "-name", "deno", "-type", "f"],
-            capture_output=True, text=True, timeout=10
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            path = r.stdout.strip().split("\n")[0]
-            print(f"✅ Deno ditemukan di nix store: {path}")
-            return f"deno:{path}"
-    except Exception:
-        pass
-
-    # Coba node langsung
-    for cmd in ["node", "nodejs", "/usr/bin/node", "/usr/local/bin/node"]:
+    # Cari di seluruh /nix/store (Railway pakai nixpacks)
+    for binary, prefix in [("node", "nodejs"), ("deno", "deno")]:
         try:
-            r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=5)
-            if r.returncode == 0:
-                w = subprocess.run(["which", cmd], capture_output=True, text=True)
-                path = w.stdout.strip() if w.returncode == 0 else cmd
-                print(f"✅ Node.js ditemukan: {path}")
-                return f"nodejs:{path}"
+            r = subprocess.run(
+                ["find", "/nix/store", "-name", binary, "-type", "f"],
+                capture_output=True, text=True, timeout=15
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                candidates = [
+                    p for p in r.stdout.strip().split("\n")
+                    if f"/bin/{binary}" in p
+                ]
+                if candidates:
+                    path = candidates[0]
+                    print(f"✅ {binary} ditemukan di nix store: {path}")
+                    return f"{prefix}:{path}"
         except Exception:
             pass
 
-    # Coba cari node di nix store
-    try:
-        r = subprocess.run(
-            ["find", "/nix/store", "-maxdepth", "5", "-name", "node", "-type", "f"],
-            capture_output=True, text=True, timeout=10
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            lines = [l for l in r.stdout.strip().split("\n") if "bin/node" in l]
-            if lines:
-                path = lines[0]
-                print(f"✅ Node.js ditemukan di nix store: {path}")
-                return f"nodejs:{path}"
-    except Exception:
-        pass
+    # Cari di /app/.venv dan mise shims
+    for path in [
+        "/mise/shims/node", "/mise/shims/deno",
+        "/app/.venv/bin/node", "/usr/bin/node",
+        "/usr/local/bin/node",
+    ]:
+        if os.path.isfile(path):
+            prefix = "deno" if "deno" in path else "nodejs"
+            print(f"✅ Runtime ditemukan: {path}")
+            return f"{prefix}:{path}"
 
     print("⚠️ JS Runtime tidak ditemukan, lanjut tanpa JS runtime.")
     return None
@@ -140,9 +97,7 @@ def get_ydl_opts(extra=None):
 
 # ─── Cari info lagu ───────────────────────────────────────────────
 def search_and_get_info(query: str) -> dict:
-    ydl_opts = get_ydl_opts({
-        "default_search": "ytsearch1",
-    })
+    ydl_opts = get_ydl_opts({"default_search": "ytsearch1"})
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(query, download=False)
         if "entries" in info:
@@ -202,13 +157,10 @@ async def play_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     query = " ".join(ctx.args)
     chat_id = update.effective_chat.id
-
     msg = await update.message.reply_text(f"🔍 Mencari: *{query}*...", parse_mode="Markdown")
 
     try:
-        info = await asyncio.get_event_loop().run_in_executor(
-            None, search_and_get_info, query
-        )
+        info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
     except Exception as e:
         await msg.edit_text(f"❌ Gagal mencari lagu: {e}")
         return
@@ -259,7 +211,6 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
         file_path = await asyncio.get_event_loop().run_in_executor(
             None, download_audio, track["url"], filename
         )
-
         with open(file_path, "rb") as audio:
             await ctx.bot.send_audio(
                 chat_id=chat_id,
@@ -268,9 +219,7 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
                 performer=track["uploader"],
                 duration=track["duration"],
             )
-
         os.remove(file_path)
-
     except Exception as e:
         await ctx.bot.send_message(chat_id, f"❌ Error saat memutar: {e}")
 
@@ -288,17 +237,14 @@ async def skip_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def queue_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     queue = get_queue(chat_id)
-
     if not queue and chat_id not in now_playing:
         await update.message.reply_text("📋 Antrian kosong.")
         return
 
     text = "📋 *Antrian Lagu*\n\n"
-
     if chat_id in now_playing:
         np = now_playing[chat_id]
         text += f"▶️ *{np['title']}* — {fmt_duration(np['duration'])}\n\n"
-
     for i, track in enumerate(queue, 1):
         text += f"{i}. {track['title']} — {fmt_duration(track['duration'])}\n"
 
@@ -325,8 +271,7 @@ async def nowplaying_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_type = update.message.chat.type
-    if chat_type in ["group", "supergroup"]:
+    if update.message.chat.type in ["group", "supergroup"]:
         return
     ctx.args = update.message.text.split()
     await play_command(update, ctx)
@@ -341,7 +286,6 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         now_playing.pop(chat_id, None)
         await query.edit_message_text("⏭ Diskip!")
         await play_next(chat_id, update, ctx)
-
     elif data.startswith("queue_"):
         chat_id = int(data.split("_")[1])
         queue = get_queue(chat_id)
@@ -370,11 +314,7 @@ def main():
     print("Bot jalan...")
 
     if WEBHOOK_URL:
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            webhook_url=WEBHOOK_URL,
-        )
+        app.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
     else:
         app.run_polling(drop_pending_updates=True)
 
