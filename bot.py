@@ -142,6 +142,7 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
+        "format":          "ba/ba*/best",  # 🔥 FIX CRITICAL: Batasi format saat nyari info agar tidak kena block YouTube
         "extractor_args": {
             "youtube": {
                 "player_client": ["web", "mweb", "android", "ios"],
@@ -211,7 +212,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
-            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
+            "format":  "ba/ba*/best",
             "postprocessors": [{
                 "key":              "FFmpegExtractAudio",
                 "preferredcodec":   "mp3",
@@ -236,7 +237,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a2.%(ext)s",
-            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
+            "format":  "ba/ba*/best",
             "extractor_args": {
                 "youtube": {"player_client": ["ios"]}
             },
@@ -257,7 +258,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a3.%(ext)s",
-            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
+            "format":  "ba/ba*/best",
             "extractor_args": {
                 "youtube": {"player_client": ["web", "mweb"]}
             },
@@ -278,7 +279,7 @@ def download_audio(url: str, filename: str) -> str:
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a4.%(ext)s",
-            "format":  "ba/ba*/best",  # FIX: Ditambahkan /best fallback
+            "format":  "ba/ba*/best",
             "extractor_args": {
                 "youtube": {"player_client": ["android", "ios", "web", "mweb"]}
             },
@@ -331,12 +332,10 @@ async def play_next(chat_id: int):
         print(f"send_message error: {e}")
 
     try:
-        # FIX LOOP AMAN: Menggunakan asyncio.to_thread bawaan Python 3.10+ agar tetap di satu event loop utama
         file_path = await asyncio.to_thread(
             download_audio, track["url"], f"{chat_id}_{safe}"
         )
         
-        # Eksekusi stream musik ke VC lewat core loop yang sama
         await calls.play(chat_id, MediaStream(file_path))
         
         now_playing[chat_id]["file_path"] = file_path
@@ -350,7 +349,6 @@ async def play_next(chat_id: int):
         await play_next(chat_id)
 
 
-# Mendaftarkan callback untuk menangani track selesai
 async def on_stream_end_handler(client, update):
     if not isinstance(update, StreamEnded):
         return
@@ -523,7 +521,6 @@ async def main():
 
     print("🚀 Starting bot...")
 
-    # Delete webhook Telegram
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
@@ -533,21 +530,17 @@ async def main():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
-    # Generate bypass data
     VISITOR_DATA = generate_visitor_data_lokal()
     print(f"✅ Berhasil generate Token Lokal -> VISITOR_DATA: {VISITOR_DATA}")
     print(f"✅ Menggunakan PO Token Web Client: {PO_TOKEN}")
 
-    # FIX CRITICAL: Inisialisasi clients di dalam loop async yang aktif saat ini
     bot   = TelegramClient("bot_session", API_ID, API_HASH)
     user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
     calls = PyTgCalls(user)
 
-    # Daftarkan penangan event dan callback stream ended
     register_handlers(bot)
     calls.on_update()(on_stream_end_handler)
 
-    # Login userbot
     print("👤 Login userbot via StringSession...")
     try:
         await user.start()
@@ -557,7 +550,6 @@ async def main():
         print(f"❌ Userbot login error: {e}")
         raise
 
-    # Login bot
     for attempt in range(10):
         try:
             await bot.start(bot_token=BOT_TOKEN)
@@ -574,7 +566,6 @@ async def main():
     else:
         raise Exception("Gagal login bot 10x")
 
-    # Start PyTgCalls
     try:
         await calls.start()
         print("✅ PyTgCalls started (userbot)")
@@ -582,7 +573,6 @@ async def main():
         print(f"❌ PyTgCalls error: {e}")
         raise
 
-    # Health check server buat Railway
     async def health(request):
         return web.Response(text="OK")
 
@@ -595,7 +585,6 @@ async def main():
     print(f"✅ Health check port {port}")
     print("✅ Bot siap!")
 
-    # Loop pertahanan anti crash Telethon & loop mismatch
     while True:
         try:
             await bot.run_until_disconnected()
