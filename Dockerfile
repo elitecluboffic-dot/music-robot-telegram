@@ -7,15 +7,21 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g youtube-po-token-generator
 
 WORKDIR /app
+
+# 🔥 FIX TOTAL: Install library dasar + tambahkan "requests" di sini!
 RUN pip install --no-cache-dir \
     "telethon" \
     "aiohttp" \
     "yt-dlp" \
-    "python-dotenv"
+    "python-dotenv" \
+    "requests"
+
 RUN pip install --no-cache-dir --pre \
     "ntgcalls==2.2.1b3" \
     "git+https://github.com/pytgcalls/pytgcalls.git"
+
 RUN python -c "from telethon import TelegramClient; print('Telethon OK')"
 RUN python -c "from pytgcalls import PyTgCalls; print('PyTgCalls OK')"
+
 COPY . .
 CMD ["python", "-u", "bot.py"]
