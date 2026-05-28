@@ -47,8 +47,8 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Hapus session bot lama sebelum startup
-for f in glob.glob("bot_session.session") + glob.glob("bot_session.session-journal"):
+# 🔥 FIX INTERNAL SESSION: Hapus semua sisa session lama biar gak kena invalid nonce hash
+for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     try:
         os.remove(f)
     except Exception:
@@ -105,7 +105,7 @@ def get_dynamic_free_proxy():
             if resp.status_code == 200:
                 proxies = resp.text.strip().split("\n")
                 if proxies:
-                    sampled = random.sample(proxies, min(20, len(proxies)))
+                    sampled = random.sample(proxies, min(25, len(proxies)))
                     for p in sampled:
                         proxy_pool.append(f"http://{p.strip()}")
         except Exception as e:
@@ -119,7 +119,6 @@ def get_dynamic_free_proxy():
     
     for attempt, proxy_str in enumerate(proxy_pool[:8], 1):
         try:
-            # Tes ke google langsung biar bener-bener akurat buat koneksi luar
             test_resp = requests.get("https://www.google.com", proxies={"http": proxy_str, "https": proxy_str}, timeout=2.5)
             if test_resp.status_code == 200:
                 print(f"✅ Proxy OK (Percobaan {attempt}): {proxy_str}")
@@ -131,7 +130,7 @@ def get_dynamic_free_proxy():
     print(f"⚠️ Proxy test semuanya lambat, pakai nekat: {fallback_pick}")
     return fallback_pick
 
-# ─── YT-DLP CONFIGURATIONS (FIX FORMAT UNIVERSAL) ────────────────
+# ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
 _JS_KEY  = None
 _JS_PATH = None
 
@@ -151,7 +150,7 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 12,  
-        "format":         "best/highest",  # 🔥 FIX FORMAT: Ambil apa aja yang ada biar gak error Requested format
+        "format":         "best/highest",  # 🔥 FIX NUKLIR: Ambil format standar apa saja agar proxy luar negeri tidak error format
         "noplaylist":      True,
         "ignoreerrors":    True,
         "proxy":          get_dynamic_free_proxy(),  
@@ -191,56 +190,70 @@ def get_ydl_opts(extra=None):
 
 
 def search_and_get_info(query: str) -> dict:
-    info_opts = {
-        "quiet":          True,
-        "no_warnings":    True,
-        "skip_download":  True,
-        "noplaylist":      True,
-        "default_search": "ytsearch1",
-        "ignoreerrors":    False,
-        "socket_timeout": 12, 
-        "proxy":          get_dynamic_free_proxy(),  
-        "format":         "best/highest",  # 🔥 FIX FORMAT JUGA DI SINI
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"],
-            }
-        },
-    }
-
-    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-        info_opts["cookiefile"] = COOKIES_FILE
-
-    if PO_TOKEN:
-        info_opts["extractor_args"]["youtube"]["po_token"] = [f"{PO_TOKEN}"]
-        if VISITOR_DATA:
-            info_opts["extractor_args"]["youtube"]["visitor_data"] = [VISITOR_DATA]
-
-    with yt_dlp.YoutubeDL(info_opts) as ydl:
-        info = ydl.extract_info(query, download=False)
-
-        if info is None:
-            raise Exception("Tidak ditemukan hasil apapun")
-
-        if "entries" in info:
-            entries = list(info["entries"])
-            if not entries:
-                raise Exception("Hasil pencarian kosong")
-            info = entries[0]
-
-        if not info:
-            raise Exception("Info lagu tidak valid")
-
-        url = info.get("webpage_url") or info.get("url", "")
-        if not url:
-            raise Exception("URL lagu tidak ditemukan")
-
-        return {
-            "title":    info.get("title", "Unknown"),
-            "url":      url,
-            "duration": info.get("duration", 0),
-            "uploader": info.get("uploader", "Unknown"),
+    last_error = None
+    
+    # 🔥 FIX AUTO-RETRY LOOP: Jika proxy timeout pas nyari info lagu, otomatis ganti proxy baru sampai 5 kali
+    for run in range(1, 6):
+        proxy_current = get_dynamic_free_proxy()
+        print(f"🔍 Mencari info lagu (Percobaan {run}/5) menggunakan proxy: {proxy_current}")
+        
+        info_opts = {
+            "quiet":          True,
+            "no_warnings":    True,
+            "skip_download":  True,
+            "noplaylist":      True,
+            "default_search": "ytsearch1",
+            "ignoreerrors":    False,
+            "socket_timeout": 12, 
+            "proxy":          proxy_current,  
+            "format":         "best/highest",  # 🔥 SAMA: Paksa format universal
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "web"],
+                }
+            },
         }
+
+        if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+            info_opts["cookiefile"] = COOKIES_FILE
+
+        if PO_TOKEN:
+            info_opts["extractor_args"]["youtube"]["po_token"] = [f"{PO_TOKEN}"]
+            if VISITOR_DATA:
+                info_opts["extractor_args"]["youtube"]["visitor_data"] = [VISITOR_DATA]
+
+        try:
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
+                info = ydl.extract_info(query, download=False)
+
+                if info is None:
+                    continue
+
+                if "entries" in info:
+                    entries = list(info["entries"])
+                    if not entries:
+                        continue
+                    info = entries[0]
+
+                if not info:
+                    continue
+
+                url = info.get("webpage_url") or info.get("url", "")
+                if not url:
+                    continue
+
+                return {
+                    "title":    info.get("title", "Unknown"),
+                    "url":      url,
+                    "duration": info.get("duration", 0),
+                    "uploader": info.get("uploader", "Unknown"),
+                }
+        except Exception as e:
+            print(f"⚠️ Percobaan {run}/5 gagal akibat error proxy: {e}")
+            last_error = e
+            continue
+
+    raise Exception(f"Gagal setelah 5x ganti proxy. Error terakhir: {last_error}")
 
 
 def _convert_to_mp3(src: str, dest: str) -> str:
@@ -285,7 +298,7 @@ def download_audio(url: str, filename: str) -> str:
     raise Exception("Koneksi proxy macet atau diblokir YouTube! Mencoba ulang otomatis...")
 
 
-# ─── PLAY LOGIC (FIX RETRY AUTO-LOOP) ────────────────────────────
+# ─── PLAY LOGIC ──────────────────────────────────────────────────
 
 async def play_next(chat_id: int):
     queue = get_queue(chat_id)
@@ -369,12 +382,12 @@ def register_handlers(tg_bot):
             return
 
         chat_id = event.chat_id
-        status  = await event.respond(f"🔍 Mencari **{query}**...")
+        status  = await event.respond(f"🔍 Mencari info & mengetes proxy untuk **{query}**...")
 
         try:
             info = await asyncio.to_thread(search_and_get_info, query)
         except Exception as e:
-            await status.edit(f"❌ Gagal mencari info: {e}")
+            await status.edit(f"❌ Gagal mencari info (Semua proxy mati): {e}")
             return
 
         get_queue(chat_id).append(info)
@@ -468,6 +481,8 @@ async def main():
 
     VISITOR_DATA = generate_visitor_data_lokal()
     bot   = TelegramClient("bot_session", API_ID, API_HASH)
+    
+    # Membuka sesi baru secara bersih
     user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
     calls = PyTgCalls(user)
 
