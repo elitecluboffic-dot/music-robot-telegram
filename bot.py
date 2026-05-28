@@ -19,51 +19,68 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ─── Cari deno path otomatis ──────────────────────────────────────
+# ─── Cari JS runtime otomatis ────────────────────────────────────
 def find_runtime():
-    paths = [
-        "/root/.deno/bin/deno",
-        "/usr/bin/deno",
-        "/usr/local/bin/deno",
-        "/nix/store",
-    ]
-    # Coba which deno dulu
-    try:
-        result = subprocess.run(["which", "deno"], capture_output=True, text=True)
-        if result.returncode == 0:
-            path = result.stdout.strip()
-            if path:
+    # Coba deno dulu
+    for cmd in ["deno", "/root/.deno/bin/deno", "/usr/bin/deno", "/usr/local/bin/deno"]:
+        try:
+            result = subprocess.run(
+                [cmd, "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                which = subprocess.run(["which", cmd], capture_output=True, text=True)
+                path = which.stdout.strip() if which.returncode == 0 else cmd
+                print(f"✅ Deno ditemukan: {path}")
                 return f"deno:{path}"
-    except Exception:
-        pass
+        except Exception:
+            pass
 
-    # Coba find di nix store
+    # Coba cari deno di nix store (Railway pakai nixpacks)
     try:
         result = subprocess.run(
             ["find", "/nix/store", "-name", "deno", "-type", "f"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0 and result.stdout.strip():
             path = result.stdout.strip().split("\n")[0]
+            print(f"✅ Deno ditemukan di nix store: {path}")
             return f"deno:{path}"
     except Exception:
         pass
 
-    # Coba hardcoded paths
-    for p in paths:
-        if os.path.exists(p) and os.path.isfile(p):
-            return f"deno:{p}"
-
     # Coba nodejs
+    for cmd in ["node", "nodejs", "/usr/bin/node", "/usr/local/bin/node"]:
+        try:
+            result = subprocess.run(
+                [cmd, "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                which = subprocess.run(["which", cmd], capture_output=True, text=True)
+                path = which.stdout.strip() if which.returncode == 0 else cmd
+                print(f"✅ Node.js ditemukan: {path}")
+                return f"nodejs:{path}"
+        except Exception:
+            pass
+
+    # Coba cari node di nix store
     try:
-        result = subprocess.run(["which", "node"], capture_output=True, text=True)
-        if result.returncode == 0:
-            path = result.stdout.strip()
-            if path:
+        result = subprocess.run(
+            ["find", "/nix/store", "-name", "node", "-type", "f"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Filter yang bukan nodemodules
+            paths = [p for p in result.stdout.strip().split("\n") if "bin/node" in p]
+            if paths:
+                path = paths[0]
+                print(f"✅ Node.js ditemukan di nix store: {path}")
                 return f"nodejs:{path}"
     except Exception:
         pass
 
+    print("⚠️ JS Runtime tidak ditemukan, lanjut tanpa JS runtime.")
     return None
 
 JS_RUNTIME = find_runtime()
@@ -95,7 +112,7 @@ def get_ydl_opts(extra=None):
         opts.update(extra)
     return opts
 
-# ─── Download audio ───────────────────────────────────────────────
+# ─── Cari info lagu ───────────────────────────────────────────────
 def search_and_get_info(query: str) -> dict:
     ydl_opts = get_ydl_opts({
         "default_search": "ytsearch1",
@@ -114,6 +131,7 @@ def search_and_get_info(query: str) -> dict:
             "uploader": info.get("uploader", "Unknown"),
         }
 
+# ─── Download audio ───────────────────────────────────────────────
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     ydl_opts = get_ydl_opts({
@@ -130,7 +148,9 @@ def download_audio(url: str, filename: str) -> str:
 
 # ─── Format durasi ────────────────────────────────────────────────
 def fmt_duration(seconds: int) -> str:
-    m, s = divmod(seconds, 60)
+    if not seconds:
+        return "0:00"
+    m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     if h:
         return f"{h}:{m:02d}:{s:02d}"
@@ -145,8 +165,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/queue — lihat antrian\n"
         "/skip — skip lagu sekarang\n"
         "/clear — hapus antrian\n"
-        "/nowplaying — info lagu sekarang\n\n"
-        "Di grup gunakan /play untuk memutar lagu.",
+        "/nowplaying — info lagu sekarang",
         parse_mode="Markdown"
     )
 
@@ -198,7 +217,9 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
     track = queue.pop(0)
     now_playing[chat_id] = track
 
-    filename = f"{chat_id}_{track['title'][:30].replace(' ', '_')}"
+    # Bersihkan karakter aneh di nama file
+    safe_title = "".join(c for c in track['title'][:30] if c.isalnum() or c in " _-").replace(" ", "_")
+    filename = f"{chat_id}_{safe_title}"
 
     await ctx.bot.send_message(
         chat_id,
@@ -228,6 +249,7 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         await ctx.bot.send_message(chat_id, f"❌ Error saat memutar: {e}")
 
+    # Lanjut ke lagu berikutnya
     await play_next(chat_id, update, ctx)
 
 async def skip_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
