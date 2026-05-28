@@ -7,14 +7,13 @@ import yt_dlp
 from dotenv import load_dotenv
 from aiohttp import web
 
-from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pyrogram.errors import FloodWait
+from hydrogram import Client, filters
+from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from hydrogram.errors import FloodWait
 
 from pytgcalls import PyTgCalls
 from pytgcalls import filters as tg_filters
 from pytgcalls.types import MediaStream, StreamEnded
-from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 
 load_dotenv()
 
@@ -287,16 +286,15 @@ async def cb_handler(_, cq: CallbackQuery):
     else:
         await cq.answer()
 
-# catch_all PALING BAWAH
 @app.on_message(group=999)
 async def catch_all(_, msg: Message):
     print(f"📨 chat={msg.chat.id} type={msg.chat.type} text={msg.text!r}")
 
 
-# ─── STARTUP ─────────────────────────────────────────────────────
-async def startup():
+async def main():
     print("🚀 Starting bot...")
 
+    # Delete webhook + drop pending
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
@@ -306,6 +304,22 @@ async def startup():
     except Exception as e:
         print(f"⚠️ deleteWebhook error: {e}")
 
+    # Start hydrogram
+    for attempt in range(5):
+        try:
+            await app.start()
+            me = await app.get_me()
+            print(f"✅ Login @{me.username} (id={me.id})")
+            break
+        except FloodWait as e:
+            await asyncio.sleep(e.value + 5)
+        except Exception as e:
+            print(f"❌ start error: {e}")
+            raise
+    else:
+        raise Exception("Gagal login 5x")
+
+    # Start PyTgCalls
     try:
         await calls.start()
         print("✅ PyTgCalls started")
@@ -313,6 +327,7 @@ async def startup():
         print(f"❌ PyTgCalls error: {e}")
         raise
 
+    # Health check
     async def health(request):
         return web.Response(text="OK")
     server = web.Application()
@@ -324,7 +339,9 @@ async def startup():
     print(f"✅ Health check port {port}")
     print("✅ Bot ready!")
 
+    # Keep alive tanpa block dispatcher
+    await asyncio.Event().wait()
 
-# app.run() = start Pyrogram dispatcher + jalankan startup() sekaligus
-# Ini cara resmi dan paling reliable untuk pyrogram/pyrofork
-app.run(startup())
+
+if __name__ == "__main__":
+    asyncio.run(main())
