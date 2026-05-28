@@ -19,38 +19,67 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ─── Cari JS runtime otomatis ────────────────────────────────────
+# ─── Cari JS runtime ─────────────────────────────────────────────
 def find_runtime():
-    for name in ["node", "nodejs", "deno"]:
+    # yt-dlp supported: deno, node, bun, quickjs
+    candidates = [
+        ("deno", "deno"),
+        ("node", "node"),
+        ("bun", "bun"),
+    ]
+    for binary, ytdlp_key in candidates:
         try:
-            r = subprocess.run([name, "--version"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
             if r.returncode == 0:
-                w = subprocess.run(["which", name], capture_output=True, text=True)
-                path = w.stdout.strip() if w.returncode == 0 else name
-                prefix = "deno" if name == "deno" else "nodejs"
-                print(f"✅ {name} ditemukan: {path}")
-                return prefix, path
+                w = subprocess.run(["which", binary], capture_output=True, text=True)
+                path = w.stdout.strip() if w.returncode == 0 else binary
+                print(f"✅ {binary} ditemukan: {path}")
+                return ytdlp_key, path
         except Exception:
             pass
 
+    # Cari node di nix store (Railway)
     try:
         r = subprocess.run(
             ["find", "/nix/store", "-name", "node", "-type", "f"],
             capture_output=True, text=True, timeout=15
         )
         if r.returncode == 0 and r.stdout.strip():
-            candidates = [p for p in r.stdout.strip().split("\n") if "/bin/node" in p]
-            if candidates:
-                print(f"✅ node ditemukan di nix store: {candidates[0]}")
-                return "nodejs", candidates[0]
+            candidates_nix = [p for p in r.stdout.strip().split("\n") if "/bin/node" in p]
+            if candidates_nix:
+                path = candidates_nix[0]
+                print(f"✅ node ditemukan di nix store: {path}")
+                return "node", path
+    except Exception:
+        pass
+
+    # Cari deno di nix store
+    try:
+        r = subprocess.run(
+            ["find", "/nix/store", "-name", "deno", "-type", "f"],
+            capture_output=True, text=True, timeout=15
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            path = r.stdout.strip().split("\n")[0]
+            print(f"✅ deno ditemukan di nix store: {path}")
+            return "deno", path
     except Exception:
         pass
 
     print("⚠️ JS Runtime tidak ditemukan.")
     return None, None
 
-JS_RUNTIME_TYPE, JS_RUNTIME_PATH = find_runtime()
-print(f"JS Runtime: {JS_RUNTIME_TYPE}:{JS_RUNTIME_PATH}" if JS_RUNTIME_TYPE else "JS Runtime: tidak ditemukan")
+JS_RUNTIME_KEY, JS_RUNTIME_PATH = find_runtime()
+print(f"JS Runtime: {JS_RUNTIME_KEY}:{JS_RUNTIME_PATH}" if JS_RUNTIME_KEY else "JS Runtime: tidak ditemukan")
+
+# ─── Queue per chat ───────────────────────────────────────────────
+queues = {}
+now_playing = {}
+
+def get_queue(chat_id):
+    if chat_id not in queues:
+        queues[chat_id] = []
+    return queues[chat_id]
 
 # ─── YDL base opts ────────────────────────────────────────────────
 def get_ydl_opts(extra=None):
@@ -61,11 +90,12 @@ def get_ydl_opts(extra=None):
         "format": "bestaudio/best",
         "noplaylist": True,
     }
-    if os.path.exists(COOKIES_FILE):
+    # Cookies hanya pakai kalau file ada dan tidak kosong
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
-    # Format baru yt-dlp: dict {runtime: {config}}
-    if JS_RUNTIME_TYPE and JS_RUNTIME_PATH:
-        opts["js_runtimes"] = {JS_RUNTIME_TYPE: {"path": JS_RUNTIME_PATH}}
+    # Format js_runtimes yang benar untuk yt-dlp
+    if JS_RUNTIME_KEY and JS_RUNTIME_PATH:
+        opts["js_runtimes"] = {JS_RUNTIME_KEY: {"path": JS_RUNTIME_PATH}}
     if extra:
         opts.update(extra)
     return opts
@@ -199,15 +229,6 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
         await ctx.bot.send_message(chat_id, f"❌ Error saat memutar: {e}")
 
     await play_next(chat_id, update, ctx)
-
-# ─── Queue per chat ───────────────────────────────────────────────
-queues = {}
-now_playing = {}
-
-def get_queue(chat_id):
-    if chat_id not in queues:
-        queues[chat_id] = []
-    return queues[chat_id]
 
 async def skip_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
