@@ -81,7 +81,7 @@ def cleanup_file(fp):
         except Exception:
             pass
 
-# ─── YT-DLP ──────────────────────────────────────────────────────
+# ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
 _JS_KEY  = None
 _JS_PATH = None
 
@@ -101,11 +101,12 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 30,
-        "format":          "ba/ba*/best",  # FIX: Fallback ke format video jika audio murni tidak tersedia
+        "format":          "ba/ba*/best",  # Fallback ke format video jika audio murni tidak ada
         "noplaylist":      True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["web", "mweb", "android", "ios"],
+                # 🔥 FIX: Diutamakan mobile client untuk meloloskan diri dari blokir IP datacenter
+                "player_client": ["android", "ios", "web", "mweb"],
             }
         },
     }
@@ -142,10 +143,11 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
         "socket_timeout": 30,
-        "format":          "ba/ba*/best",  # 🔥 FIX CRITICAL: Batasi format saat nyari info agar tidak kena block YouTube
+        "format":          "ba/ba*/best",  # Pastikan format fleksibel agar tidak melempar error kosong
         "extractor_args": {
             "youtube": {
-                "player_client": ["web", "mweb", "android", "ios"],
+                # 📱 FIX UTAMA: Kunci hanya ke mobile client saja saat mencari info agar tidak dianggap bot spam oleh YouTube
+                "player_client": ["android", "ios"],
             }
         },
     }
@@ -208,11 +210,14 @@ def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     mp3_path    = output_path + ".mp3"
 
-    print(f"⬇️ Attempt 1: android client...")
+    print(f"⬇️ Attempt 1: android murni...")
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + ".%(ext)s",
             "format":  "ba/ba*/best",
+            "extractor_args": {
+                "youtube": {"player_client": ["android"]}
+            },
             "postprocessors": [{
                 "key":              "FFmpegExtractAudio",
                 "preferredcodec":   "mp3",
@@ -254,13 +259,13 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Attempt 2 gagal: {e}")
 
-    print("🔄 Attempt 3: web client fallback...")
+    print("🔄 Attempt 3: last resort combo mobile...")
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a3.%(ext)s",
             "format":  "ba/ba*/best",
             "extractor_args": {
-                "youtube": {"player_client": ["web", "mweb"]}
+                "youtube": {"player_client": ["android", "ios"]}
             },
         })
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -275,7 +280,7 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Attempt 3 gagal: {e}")
 
-    print("🔄 Attempt 4: last resort...")
+    print("🔄 Attempt 4: global hybrid fallback...")
     try:
         opts = get_ydl_opts({
             "outtmpl": output_path + "_a4.%(ext)s",
@@ -296,7 +301,7 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Attempt 4 gagal: {e}")
 
-    raise Exception("Semua metode download gagal. Cek koneksi atau update yt-dlp.")
+    raise Exception("Semua metode download gagal akibat blokir IP. Sediakan cookies.txt agar lolos permanen.")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
