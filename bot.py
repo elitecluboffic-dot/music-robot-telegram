@@ -7,9 +7,9 @@ import yt_dlp
 from dotenv import load_dotenv
 from aiohttp import web
 
-from hydrogram import Client, filters
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from hydrogram.errors import FloodWait
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.errors import FloodWait
 
 from pytgcalls import PyTgCalls
 from pytgcalls import filters as tg_filters
