@@ -3,21 +3,47 @@ import asyncio
 import subprocess
 import yt_dlp
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
-)
+
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import UserAlreadyParticipant, ChatAdminRequired
+
+from pytgcalls import PyTgCalls
+from pytgcalls.types import MediaStream
+from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
 
-if not TOKEN:
-    raise ValueError("BOT_TOKEN tidak ditemukan! Cek file .env atau environment variable.")
+API_ID   = int(os.getenv("API_ID", 0))
+API_HASH = os.getenv("API_HASH", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+
+if not all([API_ID, API_HASH, BOT_TOKEN]):
+    raise ValueError("API_ID, API_HASH, atau BOT_TOKEN tidak ditemukan!")
 
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# ─── Pyrogram bot client ──────────────────────────────────────────
+app = Client(
+    "music_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+)
+
+# ─── PyTgCalls ───────────────────────────────────────────────────
+calls = PyTgCalls(app)
+
+# ─── Queue & state ───────────────────────────────────────────────
+queues    = {}
+now_playing = {}
+
+def get_queue(chat_id):
+    if chat_id not in queues:
+        queues[chat_id] = []
+    return queues[chat_id]
 
 # ─── Cari JS runtime ─────────────────────────────────────────────
 def find_runtime():
@@ -31,8 +57,6 @@ def find_runtime():
                 return binary, path
         except Exception:
             pass
-
-    # Cari node di nix store
     try:
         r = subprocess.run(
             ["find", "/nix/store", "-name", "node", "-type", "f"],
@@ -45,23 +69,12 @@ def find_runtime():
                 return "node", candidates[0]
     except Exception:
         pass
-
     print("⚠️ JS Runtime tidak ditemukan.")
     return None, None
 
 JS_RUNTIME_KEY, JS_RUNTIME_PATH = find_runtime()
-print(f"JS Runtime: {JS_RUNTIME_KEY}:{JS_RUNTIME_PATH}" if JS_RUNTIME_KEY else "JS Runtime: tidak ditemukan")
 
-# ─── Queue per chat ───────────────────────────────────────────────
-queues = {}
-now_playing = {}
-
-def get_queue(chat_id):
-    if chat_id not in queues:
-        queues[chat_id] = []
-    return queues[chat_id]
-
-# ─── YDL base opts ────────────────────────────────────────────────
+# ─── YDL opts ────────────────────────────────────────────────────
 def get_ydl_opts(extra=None):
     opts = {
         "quiet": True,
@@ -69,30 +82,21 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 30,
         "format": "bestaudio/best",
         "noplaylist": True,
-        # Download challenge solver dari GitHub otomatis
         "extractor_args": {
             "youtube": {
                 "player_client": ["web", "android"],
             }
         },
     }
-
-    # Cookies hanya pakai kalau file ada dan tidak kosong
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
-
-    # JS runtime
     if JS_RUNTIME_KEY and JS_RUNTIME_PATH:
         opts["js_runtimes"] = {JS_RUNTIME_KEY: {"path": JS_RUNTIME_PATH}}
-
-    # Aktifkan remote challenge solver (ejs:github)
-    opts["allow_unplayable_formats"] = False
-
     if extra:
         opts.update(extra)
     return opts
 
-# ─── Cari info lagu ───────────────────────────────────────────────
+# ─── Search info ─────────────────────────────────────────────────
 def search_and_get_info(query: str) -> dict:
     ydl_opts = get_ydl_opts({"default_search": "ytsearch1"})
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -102,9 +106,9 @@ def search_and_get_info(query: str) -> dict:
         if not info:
             raise Exception("Lagu tidak ditemukan")
         return {
-            "title": info.get("title", "Unknown"),
-            "url": info.get("webpage_url"),
-            "thumbnail": info.get("thumbnail"),
+            "title":    info.get("title", "Unknown"),
+            "url":      info.get("webpage_url"),
+            "thumbnail":info.get("thumbnail"),
             "duration": info.get("duration", 0),
             "uploader": info.get("uploader", "Unknown"),
         }
@@ -130,112 +134,150 @@ def fmt_duration(seconds) -> str:
         return "0:00"
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
-# ─── Commands ─────────────────────────────────────────────────────
-async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎵 *Music Bot*\n\n"
-        "Perintah yang tersedia:\n"
-        "/play `<judul lagu>` — putar lagu\n"
-        "/queue — lihat antrian\n"
-        "/skip — skip lagu sekarang\n"
-        "/clear — hapus antrian\n"
-        "/nowplaying — info lagu sekarang",
-        parse_mode="Markdown"
-    )
-
-async def play_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.args:
-        await update.message.reply_text("❗ Contoh: `/play shape of you`", parse_mode="Markdown")
-        return
-
-    query = " ".join(ctx.args)
-    chat_id = update.effective_chat.id
-    msg = await update.message.reply_text(f"🔍 Mencari: *{query}*...", parse_mode="Markdown")
-
-    try:
-        info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
-    except Exception as e:
-        await msg.edit_text(f"❌ Gagal mencari lagu: {e}")
-        return
-
-    queue = get_queue(chat_id)
-    queue.append(info)
-
-    keyboard = [[
-        InlineKeyboardButton("⏭ Skip", callback_data=f"skip_{chat_id}"),
-        InlineKeyboardButton("📋 Queue", callback_data=f"queue_{chat_id}"),
-    ]]
-
-    await msg.edit_text(
-        f"✅ Ditambahkan ke antrian!\n\n"
-        f"🎵 *{info['title']}*\n"
-        f"👤 {info['uploader']}\n"
-        f"⏱ {fmt_duration(info['duration'])}",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-    if len(queue) == 1 and chat_id not in now_playing:
-        await play_next(chat_id, update, ctx)
-
-async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+# ─── Play next di voice chat ──────────────────────────────────────
+async def play_next(chat_id: int):
     queue = get_queue(chat_id)
     if not queue:
         now_playing.pop(chat_id, None)
-        await ctx.bot.send_message(chat_id, "✅ Antrian habis.")
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
+        await app.send_message(chat_id, "✅ Antrian habis, keluar dari voice chat.")
         return
 
     track = queue.pop(0)
     now_playing[chat_id] = track
 
-    safe_title = "".join(c for c in track['title'][:30] if c.isalnum() or c in " _-").replace(" ", "_")
+    safe_title = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
     filename = f"{chat_id}_{safe_title}"
 
-    await ctx.bot.send_message(
+    await app.send_message(
         chat_id,
         f"▶️ *Now Playing*\n\n"
         f"🎵 *{track['title']}*\n"
         f"👤 {track['uploader']}\n"
         f"⏱ {fmt_duration(track['duration'])}",
-        parse_mode="Markdown"
+        parse_mode="markdown",
     )
 
     try:
         file_path = await asyncio.get_event_loop().run_in_executor(
             None, download_audio, track["url"], filename
         )
-        with open(file_path, "rb") as audio:
-            await ctx.bot.send_audio(
-                chat_id=chat_id,
-                audio=audio,
-                title=track["title"],
-                performer=track["uploader"],
-                duration=track["duration"],
-            )
-        os.remove(file_path)
+
+        await calls.play(
+            chat_id,
+            MediaStream(file_path),
+        )
+
+        # Hapus file setelah selesai (pantau via stream_end callback)
+        now_playing[chat_id]["file_path"] = file_path
+
     except Exception as e:
-        await ctx.bot.send_message(chat_id, f"❌ Error saat memutar: {e}")
+        await app.send_message(chat_id, f"❌ Error: {e}")
+        # Coba lanjut ke lagu berikutnya
+        await play_next(chat_id)
 
-    await play_next(chat_id, update, ctx)
+# ─── Callback saat lagu selesai ──────────────────────────────────
+@calls.on_stream_end()
+async def on_stream_end(_, update):
+    chat_id = update.chat_id
+    # Hapus file lama
+    track = now_playing.get(chat_id, {})
+    fp = track.get("file_path")
+    if fp and os.path.exists(fp):
+        try:
+            os.remove(fp)
+        except Exception:
+            pass
+    await play_next(chat_id)
 
-async def skip_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id not in now_playing:
-        await update.message.reply_text("❗ Tidak ada lagu yang sedang diputar.")
+# ─── /start ──────────────────────────────────────────────────────
+@app.on_message(filters.command("start"))
+async def start(_, msg: Message):
+    await msg.reply_text(
+        "🎵 *Music Bot — Voice Chat*\n\n"
+        "Perintah:\n"
+        "/play `<judul lagu>` — putar lagu di voice chat\n"
+        "/skip — skip lagu sekarang\n"
+        "/queue — lihat antrian\n"
+        "/clear — hapus antrian\n"
+        "/nowplaying — info lagu sekarang\n"
+        "/stop — stop & keluar voice chat\n\n"
+        "⚠️ Bot harus sudah join ke grup dan ada Voice Chat aktif.",
+        parse_mode="markdown",
+    )
+
+# ─── /play ───────────────────────────────────────────────────────
+@app.on_message(filters.command("play") & filters.group)
+async def play_command(_, msg: Message):
+    query = " ".join(msg.command[1:])
+    if not query:
+        await msg.reply_text("❗ Contoh: `/play shape of you`", parse_mode="markdown")
         return
-    await update.message.reply_text("⏭ Skip!")
-    now_playing.pop(chat_id, None)
-    await play_next(chat_id, update, ctx)
 
-async def queue_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = msg.chat.id
+    status_msg = await msg.reply_text(f"🔍 Mencari: *{query}*...", parse_mode="markdown")
+
+    try:
+        info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Gagal mencari lagu: {e}")
+        return
+
     queue = get_queue(chat_id)
+    queue.append(info)
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("⏭ Skip", callback_data=f"skip_{chat_id}"),
+        InlineKeyboardButton("📋 Queue", callback_data=f"queue_{chat_id}"),
+    ]])
+
+    await status_msg.edit_text(
+        f"✅ Ditambahkan ke antrian!\n\n"
+        f"🎵 *{info['title']}*\n"
+        f"👤 {info['uploader']}\n"
+        f"⏱ {fmt_duration(info['duration'])}",
+        parse_mode="markdown",
+        reply_markup=keyboard,
+    )
+
+    # Kalau tidak ada lagu yang sedang main, langsung play
+    if chat_id not in now_playing:
+        await play_next(chat_id)
+
+# ─── /skip ───────────────────────────────────────────────────────
+@app.on_message(filters.command("skip") & filters.group)
+async def skip_command(_, msg: Message):
+    chat_id = msg.chat.id
+    if chat_id not in now_playing:
+        await msg.reply_text("❗ Tidak ada lagu yang sedang diputar.")
+        return
+    await msg.reply_text("⏭ Skip!")
+    track = now_playing.pop(chat_id, {})
+    fp = track.get("file_path")
+    if fp and os.path.exists(fp):
+        try:
+            os.remove(fp)
+        except Exception:
+            pass
+    try:
+        await calls.leave_call(chat_id)
+    except Exception:
+        pass
+    await play_next(chat_id)
+
+# ─── /queue ──────────────────────────────────────────────────────
+@app.on_message(filters.command("queue") & filters.group)
+async def queue_command(_, msg: Message):
+    chat_id = msg.chat.id
+    queue = get_queue(chat_id)
+
     if not queue and chat_id not in now_playing:
-        await update.message.reply_text("📋 Antrian kosong.")
+        await msg.reply_text("📋 Antrian kosong.")
         return
 
     text = "📋 *Antrian Lagu*\n\n"
@@ -245,75 +287,88 @@ async def queue_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for i, track in enumerate(queue, 1):
         text += f"{i}. {track['title']} — {fmt_duration(track['duration'])}\n"
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await msg.reply_text(text, parse_mode="markdown")
 
-async def clear_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+# ─── /clear ──────────────────────────────────────────────────────
+@app.on_message(filters.command("clear") & filters.group)
+async def clear_command(_, msg: Message):
+    chat_id = msg.chat.id
     queues[chat_id] = []
     now_playing.pop(chat_id, None)
-    await update.message.reply_text("🗑 Antrian dihapus.")
+    try:
+        await calls.leave_call(chat_id)
+    except Exception:
+        pass
+    await msg.reply_text("🗑 Antrian dihapus.")
 
-async def nowplaying_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+# ─── /stop ───────────────────────────────────────────────────────
+@app.on_message(filters.command("stop") & filters.group)
+async def stop_command(_, msg: Message):
+    chat_id = msg.chat.id
+    queues[chat_id] = []
+    now_playing.pop(chat_id, None)
+    try:
+        await calls.leave_call(chat_id)
+    except Exception:
+        pass
+    await msg.reply_text("⏹ Stop & keluar dari voice chat.")
+
+# ─── /nowplaying ─────────────────────────────────────────────────
+@app.on_message(filters.command("nowplaying") & filters.group)
+async def nowplaying_command(_, msg: Message):
+    chat_id = msg.chat.id
     if chat_id not in now_playing:
-        await update.message.reply_text("❗ Tidak ada lagu yang sedang diputar.")
+        await msg.reply_text("❗ Tidak ada lagu yang sedang diputar.")
         return
     np = now_playing[chat_id]
-    await update.message.reply_text(
+    await msg.reply_text(
         f"▶️ *Now Playing*\n\n"
         f"🎵 *{np['title']}*\n"
         f"👤 {np['uploader']}\n"
         f"⏱ {fmt_duration(np['duration'])}",
-        parse_mode="Markdown"
+        parse_mode="markdown",
     )
 
-async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type in ["group", "supergroup"]:
-        return
-    ctx.args = update.message.text.split()
-    await play_command(update, ctx)
-
-async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
+# ─── Callback buttons ─────────────────────────────────────────────
+@app.on_callback_query()
+async def callback_handler(_, cq):
+    data = cq.data
+    await cq.answer()
 
     if data.startswith("skip_"):
         chat_id = int(data.split("_")[1])
-        now_playing.pop(chat_id, None)
-        await query.edit_message_text("⏭ Diskip!")
-        await play_next(chat_id, update, ctx)
+        if chat_id not in now_playing:
+            await cq.answer("Tidak ada lagu.", show_alert=True)
+            return
+        track = now_playing.pop(chat_id, {})
+        fp = track.get("file_path")
+        if fp and os.path.exists(fp):
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
+        await cq.edit_message_text("⏭ Diskip!")
+        await play_next(chat_id)
+
     elif data.startswith("queue_"):
         chat_id = int(data.split("_")[1])
         queue = get_queue(chat_id)
         if not queue:
-            await query.answer("📋 Antrian kosong.", show_alert=True)
+            await cq.answer("📋 Antrian kosong.", show_alert=True)
         else:
             text = "\n".join([f"{i+1}. {t['title']}" for i, t in enumerate(queue)])
-            await query.answer(f"📋 Antrian:\n{text}", show_alert=True)
+            await cq.answer(f"📋 Antrian:\n{text}", show_alert=True)
 
 # ─── Main ─────────────────────────────────────────────────────────
-def main():
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("play", play_command))
-    app.add_handler(CommandHandler("skip", skip_command))
-    app.add_handler(CommandHandler("queue", queue_command))
-    app.add_handler(CommandHandler("clear", clear_command))
-    app.add_handler(CommandHandler("nowplaying", nowplaying_command))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    PORT = int(os.environ.get("PORT", 8080))
-    WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-
-    print("Bot jalan...")
-
-    if WEBHOOK_URL:
-        app.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
-    else:
-        app.run_polling(drop_pending_updates=True)
+async def main():
+    await app.start()
+    await calls.start()
+    print("✅ Bot jalan dengan voice chat support!")
+    await asyncio.get_event_loop().run_forever()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
