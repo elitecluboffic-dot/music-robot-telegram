@@ -7,7 +7,6 @@ from aiohttp import web
 
 from hydrogram import Client, filters
 from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from hydrogram.errors import UserAlreadyParticipant, ChatAdminRequired
 
 from pytgcalls import PyTgCalls, idle
 from pytgcalls import filters as tg_filters
@@ -16,16 +15,20 @@ from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 
 load_dotenv()
 
+print("🚀 [1/5] ENV loaded...")
+
 API_ID    = int(os.getenv("API_ID", 0))
 API_HASH  = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
-    raise ValueError("API_ID, API_HASH, atau BOT_TOKEN tidak ditemukan!")
+    raise ValueError("❌ API_ID, API_HASH, atau BOT_TOKEN tidak ditemukan di environment!")
 
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+print("🚀 [2/5] Dirs created...")
 
 # ─── Hydrogram bot client ─────────────────────────────────────────
 app = Client(
@@ -38,6 +41,8 @@ app = Client(
 # ─── PyTgCalls ───────────────────────────────────────────────────
 calls = PyTgCalls(app)
 
+print("🚀 [3/5] Clients initialized...")
+
 # ─── Queue & state ───────────────────────────────────────────────
 queues      = {}
 now_playing = {}
@@ -47,40 +52,40 @@ def get_queue(chat_id):
         queues[chat_id] = []
     return queues[chat_id]
 
-# ─── Cari JS runtime ─────────────────────────────────────────────
+# ─── Cari JS runtime (FIXED: tidak lagi scan /nix/store) ─────────
 def find_runtime():
-    for binary in ["deno", "node", "bun"]:
+    for binary in ["node", "deno", "bun"]:
         try:
-            r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                [binary, "--version"],
+                capture_output=True, text=True, timeout=3
+            )
             if r.returncode == 0:
-                w = subprocess.run(["which", binary], capture_output=True, text=True)
-                path = w.stdout.strip() if w.returncode == 0 else binary
-                print(f"✅ {binary} ditemukan: {path}")
-                return binary, path
+                print(f"✅ JS Runtime ditemukan: {binary}")
+                return binary, binary
         except Exception:
             pass
-    try:
-        r = subprocess.run(
-            ["find", "/nix/store", "-name", "node", "-type", "f"],
-            capture_output=True, text=True, timeout=15
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            candidates = [p for p in r.stdout.strip().split("\n") if "/bin/node" in p]
-            if candidates:
-                print(f"✅ node ditemukan di nix store: {candidates[0]}")
-                return "node", candidates[0]
-    except Exception:
-        pass
-    print("⚠️ JS Runtime tidak ditemukan.")
+    print("⚠️  JS Runtime tidak ditemukan. yt-dlp tetap berjalan tanpa JS runtime.")
     return None, None
 
-JS_RUNTIME_KEY, JS_RUNTIME_PATH = find_runtime()
+# ─── Panggil find_runtime di dalam fungsi, bukan di level modul ──
+_JS_RUNTIME_KEY = None
+_JS_RUNTIME_PATH = None
+
+def _init_runtime():
+    global _JS_RUNTIME_KEY, _JS_RUNTIME_PATH
+    if _JS_RUNTIME_KEY is None:
+        _JS_RUNTIME_KEY, _JS_RUNTIME_PATH = find_runtime()
+    return _JS_RUNTIME_KEY, _JS_RUNTIME_PATH
+
+print("🚀 [4/5] Helpers ready...")
 
 # ─── YDL opts ────────────────────────────────────────────────────
 def get_ydl_opts(extra=None):
+    js_key, js_path = _init_runtime()
     opts = {
         "quiet": True,
-        "no_warnings": False,
+        "no_warnings": True,
         "socket_timeout": 30,
         "format": "bestaudio/best",
         "noplaylist": True,
@@ -92,8 +97,9 @@ def get_ydl_opts(extra=None):
     }
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
-    if JS_RUNTIME_KEY and JS_RUNTIME_PATH:
-        opts["js_runtimes"] = {JS_RUNTIME_KEY: {"path": JS_RUNTIME_PATH}}
+        print("🍪 Menggunakan cookies.txt")
+    if js_key and js_path:
+        opts["js_runtimes"] = {js_key: {"path": js_path}}
     if extra:
         opts.update(extra)
     return opts
@@ -153,7 +159,9 @@ async def play_next(chat_id: int):
     track = queue.pop(0)
     now_playing[chat_id] = track
 
-    safe_title = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
+    safe_title = "".join(
+        c for c in track["title"][:30] if c.isalnum() or c in " _-"
+    ).replace(" ", "_")
     filename = f"{chat_id}_{safe_title}"
 
     await app.send_message(
@@ -161,7 +169,8 @@ async def play_next(chat_id: int):
         f"▶️ *Now Playing*\n\n"
         f"🎵 *{track['title']}*\n"
         f"👤 {track['uploader']}\n"
-        f"⏱ {fmt_duration(track['duration'])}",
+        f"⏱ {fmt_duration(track['duration'])}\n"
+        f"🔗 {track['url']}",
         parse_mode="markdown",
     )
 
@@ -173,7 +182,7 @@ async def play_next(chat_id: int):
         now_playing[chat_id]["file_path"] = file_path
 
     except Exception as e:
-        await app.send_message(chat_id, f"❌ Error: {e}")
+        await app.send_message(chat_id, f"❌ Error memutar lagu: {e}")
         await play_next(chat_id)
 
 # ─── Callback saat lagu selesai ──────────────────────────────────
@@ -194,14 +203,15 @@ async def on_stream_end(client, update: StreamEnded):
 async def start(_, msg: Message):
     await msg.reply_text(
         "🎵 *Music Bot — Voice Chat*\n\n"
-        "Perintah:\n"
-        "/play `<judul lagu>` — putar lagu di voice chat\n"
-        "/skip — skip lagu sekarang\n"
-        "/queue — lihat antrian\n"
-        "/clear — hapus antrian\n"
-        "/nowplaying — info lagu sekarang\n"
-        "/stop — stop & keluar voice chat\n\n"
-        "⚠️ Bot harus sudah join ke grup dan ada Voice Chat aktif.",
+        "Kirim perintah berikut di *grup* dengan Voice Chat aktif:\n\n"
+        "▶️ `/play <judul lagu>` — cari & putar lagu\n"
+        "⏭ `/skip` — skip lagu sekarang\n"
+        "📋 `/queue` — lihat antrian\n"
+        "🗑 `/clear` — hapus antrian\n"
+        "🎧 `/nowplaying` — info lagu sekarang\n"
+        "⏹ `/stop` — stop & keluar voice chat\n\n"
+        "Contoh: `/play shape of you ed sheeran`\n\n"
+        "⚠️ *Bot harus sudah join grup dan ada Voice Chat aktif.*",
         parse_mode="markdown",
     )
 
@@ -210,14 +220,19 @@ async def start(_, msg: Message):
 async def play_command(_, msg: Message):
     query = " ".join(msg.command[1:])
     if not query:
-        await msg.reply_text("❗ Contoh: `/play shape of you`", parse_mode="markdown")
+        await msg.reply_text(
+            "❗ Gunakan: `/play <judul lagu>`\nContoh: `/play shape of you`",
+            parse_mode="markdown"
+        )
         return
 
     chat_id = msg.chat.id
     status_msg = await msg.reply_text(f"🔍 Mencari: *{query}*...", parse_mode="markdown")
 
     try:
-        info = await asyncio.get_event_loop().run_in_executor(None, search_and_get_info, query)
+        info = await asyncio.get_event_loop().run_in_executor(
+            None, search_and_get_info, query
+        )
     except Exception as e:
         await status_msg.edit_text(f"❌ Gagal mencari lagu: {e}")
         return
@@ -231,10 +246,11 @@ async def play_command(_, msg: Message):
     ]])
 
     await status_msg.edit_text(
-        f"✅ Ditambahkan ke antrian!\n\n"
+        f"✅ *Ditambahkan ke antrian!*\n\n"
         f"🎵 *{info['title']}*\n"
         f"👤 {info['uploader']}\n"
-        f"⏱ {fmt_duration(info['duration'])}",
+        f"⏱ {fmt_duration(info['duration'])}\n"
+        f"🔗 {info['url']}",
         parse_mode="markdown",
         reply_markup=keyboard,
     )
@@ -249,7 +265,7 @@ async def skip_command(_, msg: Message):
     if chat_id not in now_playing:
         await msg.reply_text("❗ Tidak ada lagu yang sedang diputar.")
         return
-    await msg.reply_text("⏭ Skip!")
+    await msg.reply_text("⏭ Diskip!")
     track = now_playing.pop(chat_id, {})
     fp = track.get("file_path")
     if fp and os.path.exists(fp):
@@ -318,7 +334,8 @@ async def nowplaying_command(_, msg: Message):
         f"▶️ *Now Playing*\n\n"
         f"🎵 *{np['title']}*\n"
         f"👤 {np['uploader']}\n"
-        f"⏱ {fmt_duration(np['duration'])}",
+        f"⏱ {fmt_duration(np['duration'])}\n"
+        f"🔗 {np.get('url', '-')}",
         parse_mode="markdown",
     )
 
@@ -331,7 +348,7 @@ async def callback_handler(_, cq):
     if data.startswith("skip_"):
         chat_id = int(data.split("_")[1])
         if chat_id not in now_playing:
-            await cq.answer("Tidak ada lagu.", show_alert=True)
+            await cq.answer("Tidak ada lagu yang sedang diputar.", show_alert=True)
             return
         track = now_playing.pop(chat_id, {})
         fp = track.get("file_path")
@@ -358,9 +375,21 @@ async def callback_handler(_, cq):
 
 # ─── Main ─────────────────────────────────────────────────────────
 async def main():
-    await app.start()
-    await calls.start()
-    print("✅ Bot jalan dengan voice chat support!")
+    print("🚀 [5/5] Starting bot...")
+
+    try:
+        await app.start()
+        print("✅ Hydrogram client started")
+    except Exception as e:
+        print(f"❌ Gagal start Hydrogram: {e}")
+        raise
+
+    try:
+        await calls.start()
+        print("✅ PyTgCalls started")
+    except Exception as e:
+        print(f"❌ Gagal start PyTgCalls: {e}")
+        raise
 
     # Health check server biar Railway tidak kill container
     async def health(request):
@@ -373,7 +402,8 @@ async def main():
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"✅ Health check server jalan di port {port}")
+    print(f"✅ Health check server running on port {port}")
+    print("✅ Bot siap! Kirim /start ke bot kamu di Telegram.")
 
     await idle()
 
