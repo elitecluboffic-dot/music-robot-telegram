@@ -21,44 +21,71 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # ─── Cari JS runtime otomatis ────────────────────────────────────
 def find_runtime():
-    # Coba deno dulu
+    # ── DEBUG: cari tau path deno/node di Railway ──
+    print("=== DEBUG RUNTIME ===")
+    print(f"PATH: {os.environ.get('PATH', 'tidak ada')}")
+
+    for cmd in ["deno", "node"]:
+        try:
+            r = subprocess.run(["which", cmd], capture_output=True, text=True)
+            print(f"which {cmd}: {r.stdout.strip() or 'tidak ada'}")
+        except Exception as e:
+            print(f"which {cmd}: error - {e}")
+
+    try:
+        r = subprocess.run(
+            ["find", "/nix/store", "-name", "deno", "-type", "f"],
+            capture_output=True, text=True, timeout=10
+        )
+        print(f"nix deno: {r.stdout.strip()[:300] or 'tidak ada'}")
+    except Exception as e:
+        print(f"nix deno error: {e}")
+
+    try:
+        r = subprocess.run(
+            ["find", "/nix/store", "-maxdepth", "5", "-name", "node", "-type", "f"],
+            capture_output=True, text=True, timeout=10
+        )
+        lines = [l for l in r.stdout.strip().split("\n") if "bin/node" in l]
+        print(f"nix node: {lines[:3] or 'tidak ada'}")
+    except Exception as e:
+        print(f"nix node error: {e}")
+
+    print("=====================")
+    # ── END DEBUG ──
+
+    # Coba deno langsung
     for cmd in ["deno", "/root/.deno/bin/deno", "/usr/bin/deno", "/usr/local/bin/deno"]:
         try:
-            result = subprocess.run(
-                [cmd, "--version"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                which = subprocess.run(["which", cmd], capture_output=True, text=True)
-                path = which.stdout.strip() if which.returncode == 0 else cmd
+            r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                w = subprocess.run(["which", cmd], capture_output=True, text=True)
+                path = w.stdout.strip() if w.returncode == 0 else cmd
                 print(f"✅ Deno ditemukan: {path}")
                 return f"deno:{path}"
         except Exception:
             pass
 
-    # Coba cari deno di nix store (Railway pakai nixpacks)
+    # Coba cari deno di nix store
     try:
-        result = subprocess.run(
+        r = subprocess.run(
             ["find", "/nix/store", "-name", "deno", "-type", "f"],
             capture_output=True, text=True, timeout=10
         )
-        if result.returncode == 0 and result.stdout.strip():
-            path = result.stdout.strip().split("\n")[0]
+        if r.returncode == 0 and r.stdout.strip():
+            path = r.stdout.strip().split("\n")[0]
             print(f"✅ Deno ditemukan di nix store: {path}")
             return f"deno:{path}"
     except Exception:
         pass
 
-    # Coba nodejs
+    # Coba node langsung
     for cmd in ["node", "nodejs", "/usr/bin/node", "/usr/local/bin/node"]:
         try:
-            result = subprocess.run(
-                [cmd, "--version"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                which = subprocess.run(["which", cmd], capture_output=True, text=True)
-                path = which.stdout.strip() if which.returncode == 0 else cmd
+            r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                w = subprocess.run(["which", cmd], capture_output=True, text=True)
+                path = w.stdout.strip() if w.returncode == 0 else cmd
                 print(f"✅ Node.js ditemukan: {path}")
                 return f"nodejs:{path}"
         except Exception:
@@ -66,15 +93,14 @@ def find_runtime():
 
     # Coba cari node di nix store
     try:
-        result = subprocess.run(
-            ["find", "/nix/store", "-name", "node", "-type", "f"],
+        r = subprocess.run(
+            ["find", "/nix/store", "-maxdepth", "5", "-name", "node", "-type", "f"],
             capture_output=True, text=True, timeout=10
         )
-        if result.returncode == 0 and result.stdout.strip():
-            # Filter yang bukan nodemodules
-            paths = [p for p in result.stdout.strip().split("\n") if "bin/node" in p]
-            if paths:
-                path = paths[0]
+        if r.returncode == 0 and r.stdout.strip():
+            lines = [l for l in r.stdout.strip().split("\n") if "bin/node" in l]
+            if lines:
+                path = lines[0]
                 print(f"✅ Node.js ditemukan di nix store: {path}")
                 return f"nodejs:{path}"
     except Exception:
@@ -147,7 +173,7 @@ def download_audio(url: str, filename: str) -> str:
     return output_path + ".mp3"
 
 # ─── Format durasi ────────────────────────────────────────────────
-def fmt_duration(seconds: int) -> str:
+def fmt_duration(seconds) -> str:
     if not seconds:
         return "0:00"
     m, s = divmod(int(seconds), 60)
@@ -217,7 +243,6 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
     track = queue.pop(0)
     now_playing[chat_id] = track
 
-    # Bersihkan karakter aneh di nama file
     safe_title = "".join(c for c in track['title'][:30] if c.isalnum() or c in " _-").replace(" ", "_")
     filename = f"{chat_id}_{safe_title}"
 
@@ -249,7 +274,6 @@ async def play_next(chat_id: int, update: Update, ctx: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         await ctx.bot.send_message(chat_id, f"❌ Error saat memutar: {e}")
 
-    # Lanjut ke lagu berikutnya
     await play_next(chat_id, update, ctx)
 
 async def skip_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
