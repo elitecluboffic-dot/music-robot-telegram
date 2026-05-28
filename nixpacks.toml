@@ -2,7 +2,10 @@
 nixPkgs = ["ffmpeg", "nodejs_20", "python310", "python310Packages.pip"]
 
 [phases.install]
-cmds = ["pip install --pre -r requirements.txt --break-system-packages"]
+cmds = [
+  "pip install --pre --no-cache-dir --force-reinstall -r requirements.txt --break-system-packages",
+  "pip show pytgcalls"
+]
 
 [phases.start]
 cmd = "python bot.py"
