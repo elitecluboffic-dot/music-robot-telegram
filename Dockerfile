@@ -5,17 +5,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
 
 RUN pip install --no-cache-dir --pre \
     "ntgcalls==2.2.1b3" \
     "git+https://github.com/pytgcalls/pytgcalls.git" \
-    "pyrogram==2.0.106" \
+    "pyrofork" \
     TgCrypto \
     yt-dlp \
     python-dotenv
 
-RUN python -c "from pytgcalls import PyTgCalls; print('pytgcalls OK')"
+RUN python -c "from pytgcalls import PyTgCalls; print('OK')"
 
 COPY . .
 CMD ["python", "bot.py"]
