@@ -10,7 +10,6 @@ from aiohttp import web
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
-from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls import filters as tg_filters
@@ -96,21 +95,18 @@ def get_ydl_opts(extra=None):
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        # ✅ Format fleksibel dengan fallback bertingkat
         "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[ext=mp4]/best",
         "noplaylist": True,
         "extractor_args": {
             "youtube": {
-                # ✅ ios lebih jarang diblock YouTube
-                "player_client": ["ios", "web", "tv_embedded", "android"],
+                "player_client": ["ios", "mweb", "web", "tv_embedded"],
+                "player_skip": ["webpage", "configs"],
             }
         },
-        # ✅ User-Agent biar keliatan kayak browser biasa
         "http_headers": {
             "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
             ),
         },
     }
@@ -235,8 +231,10 @@ async def play_next(chat_id: int):
         await play_next(chat_id)
 
 
-@calls.on_update(tg_filters.stream_end)
-async def on_stream_end(update: StreamEnded):
+@calls.on_update()
+async def on_stream_end(update):
+    if not isinstance(update, StreamEnded):
+        return
     chat_id = update.chat_id
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
     await play_next(chat_id)
