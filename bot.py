@@ -14,7 +14,7 @@ from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
-from pytgcalls.types.stream import HighQualityAudio  # 🔥 ULTRA FIX: Jalur import PyTgCalls v2.x yang benar
+from pytgcalls.types import AudioQuality  # 🔥 ULTRA FIX: Menggunakan Enum standard terbaru v2.x/v3.x
 
 load_dotenv()
 
@@ -114,7 +114,7 @@ def get_ydl_opts(extra=None):
                 "po_token": ["web+web_embedded_player"],
             }
         },
-        # 🔥 FIX AUDIO ENGINE: Ubah ke OPUS dengan kualitas kompresi tinggi (192k)
+        # 🔥 FIX AUDIO ENGINE: Ubah ke OPUS kualitas studio (192k) standar VoIP
         "postprocessors": [{
             "key":              "FFmpegExtractAudio",
             "preferredcodec":   "opus",
@@ -170,7 +170,7 @@ def search_and_get_info(query: str) -> dict:
         url = info.get("webpage_url") or info.get("url", "")
         return {"title": info.get("title", "Unknown"), "url": url, "duration": info.get("duration", 0), "uploader": info.get("uploader", "Unknown")}
 
-# 🔥 FIX AUDIO ENGINE: Memaksa encoding audio ke standar VoIP Telegram (48kHz Stereo)
+# 🔥 FIX AUDIO ENGINE: Memaksa encoding audio ke standar VoIP Telegram (48kHz Stereo Opus)
 def _convert_to_opus(src: str, dest: str) -> str:
     subprocess.run([
         "ffmpeg", "-y", "-i", src, 
@@ -217,12 +217,12 @@ async def play_next(chat_id: int):
         try:
             file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=120)
             
-            # 🔥 FIX AUDIO ENGINE: Menggunakan HighQualityAudio() yang diimport dengan benar
+            # 🔥 FIX AUDIO ENGINE V2: Pakai AudioQuality.STUDIO (Bypass Noise Suppression & HD Audio)
             await calls.play(
                 chat_id, 
                 MediaStream(
                     file_path,
-                    audio_parameters=HighQualityAudio()
+                    audio_parameters=AudioQuality.STUDIO
                 )
             )
             
