@@ -11,6 +11,7 @@ from aiohttp import web
 
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
+from telethon.errors import FloodWaitError  # 🔥 FIX ERROR COOLDOWN
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
@@ -45,8 +46,8 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-# 🔥 OPSIONAL: Jika setelah pakai kode ini masih error, kosongkan PROXY_URL (PROXY_URL = "") biar pakai IP asli VPS lu!
-PROXY_URL = "http://toin9yrjzjo2:yrr618lfcgo1ri0@65.111.28.4:3129"
+# 🔥 JALUR PENYELAMATAN YOUTUBE: Kosongkan ("") jika proxy lu dirasa bikin buntu
+PROXY_URL = "http://hhumibam:9h6wl3nko9hd@84.247.60.125:6095"
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
@@ -91,8 +92,6 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 30,
         "noplaylist":      True,
         "ignoreerrors":   True,
-        
-        # 🔥 HANCURKAN FORMAT RESTRICTION: Biarkan yt-dlp secara internal mencari manifest default terbaik
         "format":         "ba/b", 
         "keepvideo":      False,
     }
@@ -107,7 +106,6 @@ def get_ydl_opts(extra=None):
         "Accept-Language": "en-US,en;q=0.5",
     }
     
-    # 🔥 CLIENT SPOOFING REVOLUTION: Paksa pakai mweb/ios secara clean tanpa dash limit
     opts["extractor_args"] = {
         "youtube": {
             "player_client": ["mweb", "ios"],
@@ -165,7 +163,6 @@ def download_audio(url: str, filename: str) -> str:
         
     if os.path.exists(opus_path): return opus_path
     
-    # Ambil ekstensi apa pun yang berhasil lolos didownload
     for ext in ["opus", "webm", "m4a", "mp3", "mp4", "aac", "3gp"]:
         fp = f"{output_path}._tmp.{ext}"
         if os.path.exists(fp):
@@ -298,9 +295,8 @@ async def main():
     global bot, user, calls
     print("🚀 Inisialisasi container bot...")
     
-    print("📦 [SYSTEM] Memaksa upgrade yt-dlp ke versi terbaru untuk bypass patch YouTube...")
+    print("📦 [SYSTEM] Memaksa upgrade yt-dlp ke versi terbaru...")
     up_proc = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "pyotp"], capture_output=True, text=True)
-    print(up_proc.stdout)
     
     global yt_dlp
     import importlib
@@ -322,11 +318,29 @@ async def main():
     if TWO_FA_PASSWORD:
         credential = generate_otp_or_password(TWO_FA_PASSWORD)
         print("🔐 [2FA ENGINE] Membuka proteksi login session menggunakan password teks...")
-        await user.start(password=lambda: credential)
+        try:
+            await user.start(password=lambda: credential)
+        except FloodWaitError as e:
+            print(f"⏳ [FLOODWAIT USERBOT] Telegram meminta tunggu {e.seconds} detik sebelum login userbot...")
+            await asyncio.sleep(e.seconds)
+            await user.start(password=lambda: credential)
     else:
-        await user.start()
+        try:
+            await user.start()
+        except FloodWaitError as e:
+            print(f"⏳ [FLOODWAIT USERBOT] Telegram meminta tunggu {e.seconds} detik sebelum login userbot...")
+            await asyncio.sleep(e.seconds)
+            await user.start()
 
-    await bot.start(bot_token=BOT_TOKEN)
+    # 🔥 FIX COOLDOWN: Bungkus start bot dengan logic penahan FloodWaitError
+    try:
+        await bot.start(bot_token=BOT_TOKEN)
+    except FloodWaitError as e:
+        print(f"⏳ [FLOODWAIT BOT] Telegram membatasi login! Script otomatis tidur selama {e.seconds} detik...")
+        await asyncio.sleep(e.seconds)
+        print("🚀 Bangun! Mencoba login kembali ke Telegram...")
+        await bot.start(bot_token=BOT_TOKEN)
+
     await calls.start()
 
     async def health(request): return web.Response(text="OK")
