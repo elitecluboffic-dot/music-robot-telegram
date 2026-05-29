@@ -46,7 +46,6 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-# 🔥 PROXY DIHAPUS TOTAL BIAR PAKAI IP ASLI VPS LU YANG BERSIH!
 PROXY_URL = ""
 
 def get_queue(chat_id):
@@ -87,9 +86,9 @@ def get_active_cookie_file() -> str:
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
-        "quiet":          True,
-        "no_warnings":    True,
-        "socket_timeout": 30,
+        "quiet":          False,  # 🔥 DIUBAH KE FALSE: Biar lu bisa ngeliat KODE OAUTH yang muncul di log container!
+        "no_warnings":    False,
+        "socket_timeout": 60,
         "noplaylist":      True,
         "ignoreerrors":   True,
         "format":         "ba/b", 
@@ -102,10 +101,12 @@ def get_ydl_opts(extra=None):
         "Accept-Language": "en-US,en;q=0.5",
     }
     
+    # 🔥 OAUTH INJECTION: Memaksa yt-dlp meminta otorisasi akun Google via device link
     opts["extractor_args"] = {
         "youtube": {
             "player_client": ["mweb", "ios"],
-            "skip": ["dash", "hls"]
+            "skip": ["dash", "hls"],
+            "oauth": True  # 🚀 NYALAKAN OTENTIKASI AKUN DI SINI
         }
     }
     
