@@ -107,7 +107,9 @@ def get_ydl_opts(extra=None):
         "noplaylist":      True,
         "ignoreerrors":    True,
         "source_address": "0.0.0.0",  
-        "format":         "bestaudio/best",  # Tetap pertahankan format audio terbaik untuk download
+        # FIX ULTIMATE: Menggunakan format fallback bertingkat demi menghindari "format not available"
+        "format":         "bestaudio/best",
+        "keepvideo":      False, # Otomatis buang video setelah didownload jika terpaksa mengambil stream campuran
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "tv"],
@@ -149,7 +151,8 @@ def search_and_get_info(query: str) -> dict:
         "ignoreerrors":    False,
         "socket_timeout": 30,
         "source_address": "0.0.0.0",
-        # FIX: Opsi "format" sengaja dihapus di sini supaya yt-dlp ga rewel saat ambil metadata info video/Shorts
+        # FIX ULTIMATE: Izinkan yt-dlp mengambil format apa saja saat ekstraksi informasi awal
+        "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "tv"],
