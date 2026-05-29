@@ -14,7 +14,7 @@ from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
-from pytgcalls.types import HighQualityAudio  # 🔥 FIX ENGINE AUDIO AUDIO HD
+from pytgcalls.types.stream import HighQualityAudio  # 🔥 ULTRA FIX: Jalur import PyTgCalls v2.x yang benar
 
 load_dotenv()
 
@@ -217,7 +217,7 @@ async def play_next(chat_id: int):
         try:
             file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=120)
             
-            # 🔥 FIX AUDIO ENGINE: Paksa bypass noise suppression bawaan Telegram biar suara stabil ga gede kecil
+            # 🔥 FIX AUDIO ENGINE: Menggunakan HighQualityAudio() yang diimport dengan benar
             await calls.play(
                 chat_id, 
                 MediaStream(
