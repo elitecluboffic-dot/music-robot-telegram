@@ -80,46 +80,48 @@ def cleanup_file(fp):
         except Exception:
             pass
 
-# ─── SMART DYNAMIC PROXY SYSTEM (VALIDASI AUTO RETRY) ────────────
+# ─── NEW ENGINE: PROXY SCRAPE REVOLUTION (FREE & AUTO UPDATE) ────
 
 def get_dynamic_free_proxy():
-    api_key = os.getenv("GEONODE_API_KEY")
     proxy_pool = []
     
-    if api_key:
-        try:
-            url = f"https://api.geonode.com/gproxi/v1/proxies?apiKey={api_key}&limit=5&protocols=http&anonymityLevel=elite"
-            response = requests.get(url, timeout=3)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("data"):
-                    for p in data["data"]:
-                        proxy_pool.append(f"http://{p['ip']}:{p['port']}")
-        except Exception as e:
-            print(f"⚠️ Geonode API error/timeout: {e}")
+    # 🔥 GANTI GEONODE: Pakai API ProxyScrape gratisan (Highly Anonymized / Elite)
+    try:
+        url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=2000&country=all&ssl=all&anonymity=elite"
+        response = requests.get(url, timeout=4)
+        if response.status_code == 200 and response.text.strip():
+            proxies = response.text.strip().split("\r\n")
+            if not proxies or len(proxies) < 2:
+                proxies = response.text.strip().split("\n")
+            for p in proxies:
+                if p.strip():
+                    proxy_pool.append(f"http://{p.strip()}")
+    except Exception as e:
+        print(f"⚠️ ProxyScrape API timeout/error: {e}")
 
-    if len(proxy_pool) < 3:
+    # Fallback ke GitHub list kalau ProxyScrape bermasalah
+    if not proxy_pool:
         try:
             fallback_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
             resp = requests.get(fallback_url, timeout=3)
             if resp.status_code == 200:
                 proxies = resp.text.strip().split("\n")
-                if proxies:
-                    sampled = random.sample(proxies, min(25, len(proxies)))
-                    for p in sampled:
-                        proxy_pool.append(f"http://{p.strip()}")
+                sampled = random.sample(proxies, min(30, len(proxies)))
+                for p in sampled:
+                    proxy_pool.append(f"http://{p.strip()}")
         except Exception as e:
-            print(f"❌ Gagal scrape proxy backup dari GitHub: {e}")
+            print(f"❌ Gagal ambil proxy backup dari GitHub: {e}")
 
     if not proxy_pool:
         return None
 
-    print(f"🔄 Memulai validasi dari {len(proxy_pool)} kandidat proxy...")
+    print(f"🔄 Memulai validasi dari {len(proxy_pool)} kandidat proxy baru...")
     random.shuffle(proxy_pool)
     
-    for attempt, proxy_str in enumerate(proxy_pool[:8], 1):
+    # Validasi kilat max 10 proxy teratas
+    for attempt, proxy_str in enumerate(proxy_pool[:10], 1):
         try:
-            test_resp = requests.get("https://www.google.com", proxies={"http": proxy_str, "https": proxy_str}, timeout=2.5)
+            test_resp = requests.get("https://www.google.com", proxies={"http": proxy_str, "https": proxy_str}, timeout=1.5)
             if test_resp.status_code == 200:
                 print(f"✅ Proxy OK (Percobaan {attempt}): {proxy_str}")
                 return proxy_str
@@ -127,7 +129,7 @@ def get_dynamic_free_proxy():
             continue
 
     fallback_pick = random.choice(proxy_pool)
-    print(f"⚠️ Proxy test semuanya lambat, pakai nekat: {fallback_pick}")
+    print(f"⚠️ Proxy lambat semua, terpaksa pakai nekat: {fallback_pick}")
     return fallback_pick
 
 # ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
@@ -149,8 +151,7 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 12,  
-        # 🔥 FIX ULTIMATE: Format dihapus total agar yt-dlp mengambil apa saja yang dikasih YouTube tanpa error format
+        "socket_timeout": 8,  
         "noplaylist":      True,
         "ignoreerrors":    True,
         "proxy":          get_dynamic_free_proxy(),  
@@ -192,9 +193,10 @@ def get_ydl_opts(extra=None):
 def search_and_get_info(query: str) -> dict:
     last_error = None
     
-    for run in range(1, 6):
+    # 🔥 OPTIMASI RETRY GALAK: 12 kali percobaan rotasi proxy murni
+    for run in range(1, 13):
         proxy_current = get_dynamic_free_proxy()
-        print(f"🔍 Mencari info lagu (Percobaan {run}/5) menggunakan proxy: {proxy_current}")
+        print(f"🔍 Mencari info lagu (Percobaan {run}/12) menggunakan proxy: {proxy_current}")
         
         info_opts = {
             "quiet":          True,
@@ -203,9 +205,8 @@ def search_and_get_info(query: str) -> dict:
             "noplaylist":      True,
             "default_search": "ytsearch1",
             "ignoreerrors":    False,
-            "socket_timeout": 12, 
+            "socket_timeout": 5, # 🔥 Potong jadi 5 detik biar responsif lewatin proxy mati
             "proxy":          proxy_current,  
-            # 🔥 FIX ULTIMATE: Parameter format di sini juga dihapus total
             "extractor_args": {
                 "youtube": {
                     "player_client": ["ios", "android", "mweb", "web"],
@@ -248,11 +249,11 @@ def search_and_get_info(query: str) -> dict:
                     "uploader": info.get("uploader", "Unknown"),
                 }
         except Exception as e:
-            print(f"⚠️ Percobaan {run}/5 gagal akibat error proxy: {e}")
+            print(f"⚠️ Percobaan {run}/12 gagal akibat error proxy: {e}")
             last_error = e
             continue
 
-    raise Exception(f"Gagal setelah 5x ganti proxy. Error terakhir: {last_error}")
+    raise Exception(f"Gagal total setelah 12x ganti proxy. Error terakhir: {last_error}")
 
 
 def _convert_to_mp3(src: str, dest: str) -> str:
@@ -294,7 +295,7 @@ def download_audio(url: str, filename: str) -> str:
     except Exception as e:
         print(f"⚠️ Proses download gagal/timeout: {e}")
 
-    raise Exception("Koneksi proxy macet atau diblokir YouTube! Mencoba ulang otomatis...")
+    raise Exception("Koneksi proxy macet! Mencoba ulang otomatis...")
 
 
 # ─── PLAY LOGIC ──────────────────────────────────────────────────
@@ -355,7 +356,7 @@ def register_handlers(tg_bot):
     @tg_bot.on(events.NewMessage(pattern=r"^/start"))
     async def cmd_start(event):
         await event.respond(
-            "🎵 **Music Bot Aktif**\n\n"
+            "🎵 **Music Bot Engine V2 Ready**\n\n"
             "▶️ `/play <lagu>` — putar lagu\n"
             "⏭ `/skip` — skip lagu\n"
             "📋 `/queue` — lihat antrian\n"
@@ -373,7 +374,7 @@ def register_handlers(tg_bot):
             return
 
         chat_id = event.chat_id
-        status  = await event.respond(f"🔍 Mencari info & mengetes proxy untuk **{query}**...")
+        status  = await event.respond(f"🔍 Merotasi proxy baru untuk mencari **{query}**...")
 
         try:
             info = await asyncio.to_thread(search_and_get_info, query)
