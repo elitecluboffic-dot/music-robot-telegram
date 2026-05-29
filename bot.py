@@ -5,6 +5,7 @@ import subprocess
 import aiohttp
 import yt_dlp
 import random
+import pyotp  # Generator OTP & Detektor Password
 from dotenv import load_dotenv
 from aiohttp import web
 
@@ -16,10 +17,11 @@ from pytgcalls.types import MediaStream, StreamEnded
 
 load_dotenv()
 
-API_ID       = int(os.getenv("API_ID", 0))
-API_HASH     = os.getenv("API_HASH", "")
-BOT_TOKEN    = os.getenv("BOT_TOKEN", "")
-USER_SESSION = os.getenv("USER_SESSION", "")
+API_ID           = int(os.getenv("API_ID", 0))
+API_HASH         = os.getenv("API_HASH", "")
+BOT_TOKEN        = os.getenv("BOT_TOKEN", "")
+USER_SESSION     = os.getenv("USER_SESSION", "")
+TWO_FA_PASSWORD  = os.getenv("TWO_FA_PASSWORD", "")  # Wadah Password Teks Biasa Lu
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada di environment variable!")
@@ -47,7 +49,6 @@ now_playing: dict = {}
 _play_locks: dict = {}
 
 # ─── CONFIG PROXY PRIVAT LU ─────────────────────────────────────
-# Format: http://username:password@IP:port
 PROXY_URL = "http://cfzmnytb:dycnaq7a4ps1@209.127.138.10:5784"
 
 def get_queue(chat_id):
@@ -92,7 +93,6 @@ def get_active_cookie_file() -> str:
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         return COOKIES_FILE
     
-    # Mencari file cadangan seperti cookies1.txt, cookies_backup.txt, dll.
     backup_cookies = [f for f in glob.glob("cookies*.txt") if os.path.getsize(f) > 0]
     if backup_cookies:
         selected_cookie = random.choice(backup_cookies)
@@ -114,7 +114,6 @@ def get_ydl_opts(extra=None):
         "format":         "bestaudio/best",
         "keepvideo":      False, 
         
-        # Integration Private Proxy
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         
@@ -161,7 +160,6 @@ def search_and_get_info(query: str) -> dict:
         "source_address": "0.0.0.0",
         "format":         "bestaudio/best",
         
-        # Integration Private Proxy
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         
@@ -333,7 +331,7 @@ def register_handlers(tg_bot):
         try:
             info = await asyncio.wait_for(
                 asyncio.to_thread(search_and_get_info, query),
-                timeout=90  # 90 detik toleransi untuk proxy
+                timeout=90  
             )
         except asyncio.TimeoutError:
             await status.edit("❌ Waktu pencarian habis (Timeout). Koneksi proxy lambat merespon.")
@@ -440,6 +438,19 @@ async def on_stream_end_handler(client, update):
 
 # ─── CORE RUNNER SYSTEM ─────────────────────────────────────────
 
+def generate_otp_or_password(secret: str) -> str:
+    """Otomatis memilah apakah input berupa Base32 Key (Authenticator) 
+    atau password teks biasa milik Verifikasi Dua Langkah."""
+    if not secret:
+        return ""
+    try:
+        # Jika itu Base32 key untuk OTP, baris ini akan sukses berjalan
+        totp = pyotp.TOTP(secret.strip().replace(" ", ""))
+        return totp.now()
+    except Exception:
+        # Jika itu password teks biasa (string biasa), kembalikan teksnya mentah-mentah
+        return secret
+
 async def main():
     global bot, user, calls
 
@@ -458,7 +469,14 @@ async def main():
     register_handlers(bot)
     calls.on_update()(on_stream_end_handler)
 
-    await user.start()
+    # ─── INTEGRASI SECURITY VERIFIKASI DUA LANGKAH ───
+    if TWO_FA_PASSWORD:
+        credential = generate_otp_or_password(TWO_FA_PASSWORD)
+        print("🔐 [2FA ENGINE] Membuka proteksi login session menggunakan password teks...")
+        await user.start(password=lambda: credential)
+    else:
+        await user.start()
+
     await bot.start(bot_token=BOT_TOKEN)
     await calls.start()
 
