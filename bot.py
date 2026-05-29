@@ -46,7 +46,7 @@ now_playing: dict = {}
 _play_locks: dict = {}
 
 # 🔥 OPSIONAL: Jika setelah pakai kode ini masih error, kosongkan PROXY_URL (PROXY_URL = "") biar pakai IP asli VPS lu!
-PROXY_URL = "http://dyzmddcg:rye2aqeltr6y@84.247.60.125:6095"
+PROXY_URL = "http://toin9yrjzjo2:yrr618lfcgo1ri0@65.111.28.4:3129"
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
