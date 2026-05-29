@@ -48,7 +48,7 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-PROXY_URL = "http://hhumibam:9h6wl3nko9hd@198.105.121.200:6462"
+PROXY_URL = "http://hhumibam:9h6wl3nko9hd@84.247.60.125:6095"
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
@@ -95,7 +95,7 @@ def get_ydl_opts(extra=None):
         "ignoreerrors":   False,
         "source_address": "0.0.0.0",
         
-        # 🔥 FIX: Diperbolehkan mengambil semua format audio terbaik agar tidak melemparkan 'format not available'
+        # 🔥 Format dilonggarkan agar menerima format audio apa saja yang tersedia di YouTube
         "format":         "bestaudio/best",
         "keepvideo":      False,
         "proxy":          PROXY_URL,
@@ -143,7 +143,7 @@ def search_and_get_info(query: str) -> dict:
         "noproxy":        "localhost,127.0.0.1",
         
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Scientific/ Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
         "extractor_args": {
             "youtube": {
@@ -315,12 +315,15 @@ async def main():
     global bot, user, calls
     print("🚀 Inisialisasi container bot...")
     
-    try:
-        import pyotp
-    except ImportError:
-        print("📦 [SYSTEM] pyotp tidak terdeteksi di cache, memaksa instalasi via runtime...")
-        process = subprocess.run([sys.executable, "-m", "pip", "install", "pyotp"], capture_output=True, text=True)
-        print(process.stdout)
+    # 🔥 AUTO UPDATER ENGINE: Paksa upgrade yt-dlp ke versi terbaru saat startup container
+    print("📦 [SYSTEM] Memaksa upgrade yt-dlp ke versi terbaru untuk bypass patch YouTube...")
+    up_proc = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "pyotp"], capture_output=True, text=True)
+    print(up_proc.stdout)
+    
+    # Reload modul yt_dlp agar runtime menggunakan versi yang baru saja di-upgrade
+    global yt_dlp
+    import importlib
+    importlib.reload(yt_dlp)
 
     try:
         async with aiohttp.ClientSession() as session:
