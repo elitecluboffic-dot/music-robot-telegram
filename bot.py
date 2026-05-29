@@ -48,7 +48,7 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-PROXY_URL = "http://hhumibam:9h6wl3nko9hd@142.111.67.146:5611"
+PROXY_URL = "http://hhumibam:9h6wl3nko9hd@64.137.10.153:5803"
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
@@ -92,27 +92,27 @@ def get_ydl_opts(extra=None):
         "no_warnings":    True,
         "socket_timeout": 60,
         "noplaylist":      True,
-        "ignoreerrors":   False,
+        "ignoreerrors":   True,
         "source_address": "0.0.0.0",
         
-        # 🔥 Format dilonggarkan agar menerima format audio apa saja yang tersedia di YouTube
-        "format":         "bestaudio/best",
+        # 🔥 ULTRA FIX FORMAT: Ambil apa aja yang ada (bisa video sekalian, nanti ffmpeg yang saring audionya)
+        # Ini bypass mutlak kalau format 'bestaudio' di-hidden sama YouTube di IP proxy lu
+        "format":         "bestaudio/best/mp4/webm/3gp/flv/avi",
         "keepvideo":      False,
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         
-        # 🔥 BYPASS ENGINE HEADERS
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (Android; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
+            "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.5",
-            "Sec-Fetch-Mode": "navigate",
         },
         
+        # 🔥 SPOOFING CLIENT BARU: Pake kombinasi android & ios app client biar tembus manifest-nya
         "extractor_args": {
             "youtube": {
-                "player_client": ["web", "tvhtml5"],
-                "po_token": ["web+web_embedded_player"],
+                "player_client": ["android", "ios"],
+                "skip": ["dash", "hls"],
             }
         },
     }
@@ -134,21 +134,20 @@ def search_and_get_info(query: str) -> dict:
         "skip_download":  True,
         "noplaylist":      True,
         "default_search": "ytsearch1",
-        "ignoreerrors":   False,
+        "ignoreerrors":   True,
         "socket_timeout": 60,
         "source_address": "0.0.0.0",
         
-        "format":         "bestaudio/best",
+        "format":         "bestaudio/best/mp4/webm/3gp/flv/avi",
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Scientific/ Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Android; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["web", "tvhtml5"],
-                "po_token": ["web+web_embedded_player"],
+                "player_client": ["android", "ios"],
             }
         },
     }
@@ -183,14 +182,16 @@ def download_audio(url: str, filename: str) -> str:
     opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
     with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([url])
     if os.path.exists(opus_path): return opus_path
-    for ext in ["opus", "webm", "m4a", "mp3", "mp4", "aac"]:
+    
+    # Deteksi ekstensi file apa pun hasil download tadi, langsung sikat masukin FFmpeg
+    for ext in ["opus", "webm", "m4a", "mp3", "mp4", "aac", "3gp", "flv"]:
         fp = f"{output_path}._tmp.{ext}"
         if os.path.exists(fp):
             if ext == "opus":
                 os.rename(fp, opus_path)
                 return opus_path
             return _convert_to_opus(fp, opus_path)
-    raise Exception("File audio gagal diunduh.")
+    raise Exception("File audio gagal diunduh atau kosong.")
 
 async def play_next(chat_id: int):
     if chat_id not in _play_locks: _play_locks[chat_id] = asyncio.Lock()
@@ -212,7 +213,6 @@ async def play_next(chat_id: int):
         try:
             file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=120)
             
-            # 🔥 FIX AUDIO ENGINE V2: Pakai AudioQuality.STUDIO bawaan versi terbaru
             await calls.play(
                 chat_id, 
                 MediaStream(
@@ -315,12 +315,10 @@ async def main():
     global bot, user, calls
     print("🚀 Inisialisasi container bot...")
     
-    # 🔥 AUTO UPDATER ENGINE: Paksa upgrade yt-dlp ke versi terbaru saat startup container
     print("📦 [SYSTEM] Memaksa upgrade yt-dlp ke versi terbaru untuk bypass patch YouTube...")
     up_proc = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "pyotp"], capture_output=True, text=True)
     print(up_proc.stdout)
     
-    # Reload modul yt_dlp agar runtime menggunakan versi yang baru saja di-upgrade
     global yt_dlp
     import importlib
     importlib.reload(yt_dlp)
