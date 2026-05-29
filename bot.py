@@ -77,7 +77,7 @@ def _init_js_runtime():
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
-        "quiet":          False,  # 🔥 Tetap False biar log interaktif OAuth kelihatan!
+        "quiet":          False,  
         "no_warnings":    False,
         "socket_timeout": 60,
         "noplaylist":      True,
@@ -86,11 +86,12 @@ def get_ydl_opts(extra=None):
         "keepvideo":      False,
     }
     
-    # 🔥 Memaksa otentikasi via TV client YouTube resmi
+    # 🔥 PENTING: Pindah dari client 'tv' (yang kena DRM) ke 'android' dan 'web' + aktifkan remote component solver!
     opts["extractor_args"] = {
         "youtube": {
-            "player_client": ["tv"],
-            "oauth": True
+            "player_client": ["android", "web"],
+            "oauth": True,
+            "remote_components": "ejs:github"
         }
     }
     
@@ -102,7 +103,6 @@ def get_ydl_opts(extra=None):
         opts.update(extra)
     return opts
 
-# 🔥 FIX: bypass extractor pencarian info mentah langsung ke target download engine
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
     opts = get_ydl_opts({
@@ -111,7 +111,6 @@ def search_and_get_info(query: str) -> dict:
     })
     
     with yt_dlp.YoutubeDL(opts) as ydl:
-        # Proses pencarian awal
         info = ydl.extract_info(f"ytsearch1:{query}", download=False)
         if info and "entries" in info and len(info["entries"]) > 0:
             entry = info["entries"][0]
@@ -120,14 +119,13 @@ def search_and_get_info(query: str) -> dict:
                 "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry['id']}",
                 "duration": entry.get("duration", 0)
             }
-        raise Exception("Gagal mencari lagu atau butuh verifikasi OAuth di terminal.")
+        raise Exception("Gagal mencari lagu. Cek log OAuth.")
 
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     opus_path    = output_path + ".opus"
     cleanup_file(opus_path)
     
-    # 🔥 Di sini OAuth akan dipicu secara penuh oleh yt-dlp karena mulai proses download
     opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
     with yt_dlp.YoutubeDL(opts) as ydl: 
         ydl.download([url])
@@ -142,7 +140,7 @@ def download_audio(url: str, filename: str) -> str:
                 return opus_path
             return _convert_to_opus(fp, opus_path)
             
-    raise Exception("Gagal mengunduh file audio. Periksa otentikasi log container.")
+    raise Exception("Gagal mengunduh stream audio setelah bypass DRM.")
 
 def _convert_to_opus(src: str, dest: str) -> str:
     subprocess.run([
@@ -169,7 +167,7 @@ async def play_next(chat_id: int):
         now_playing[chat_id] = track
         safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
         msg = None
-        try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses file audio...*")
+        try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses bypass DRM & download...*")
         except: pass
         try:
             file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=180)
@@ -188,7 +186,7 @@ async def play_next(chat_id: int):
                 except: pass
         except Exception as e:
             print(f"❌ Play error: {e}")
-            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}`. Pastikan sudah memasukkan kode OAuth di log terminal container.")
+            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}`. Periksa otentikasi OAuth baru di log terminal.")
             asyncio.create_task(play_next(chat_id))
 
 def register_handlers(tg_bot):
@@ -200,13 +198,13 @@ def register_handlers(tg_bot):
         query = event.pattern_match.group(1)
         if query: query = query.strip()
         if not query:
-            await event.respond("❗ Contoh penggunaan: `/play sisa rasa`")
+            await event.respond("❗ Contoh penggunaan: `/play lamunan`")
             return
         chat_id = event.chat_id
         status  = await event.respond(f"🔍 Memproses request **{query}** via cloud engine...")
         try: info = await asyncio.wait_for(asyncio.to_thread(search_and_get_info, query), timeout=90)
         except Exception as e:
-            await status.edit(f"❌ Pencarian gagal. Cek log container VPS untuk memasukkan kode verifikasi Google Device.")
+            await status.edit(f"❌ Pencarian gagal. Cek log container untuk memasukkan kode Google Device.")
             return
         get_queue(chat_id).append(info)
         buttons = [[Button.inline("⏭ Skip", data=f"skip_{chat_id}"), Button.inline("📋 Queue", data=f"queue_{chat_id}")]]
@@ -260,8 +258,6 @@ async def on_stream_end_handler(client, update):
         cleanup_file(now_playing.pop(update.chat_id, {}).get("file_path"))
         asyncio.create_task(play_next(update.chat_id))
 
-
-# ─── CORE RUNNER SYSTEM ─────────────────────────────────────────
 
 def generate_otp_or_password(secret: str) -> str:
     if not secret: return ""
