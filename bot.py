@@ -1,20 +1,14 @@
 import os
 import glob
-import json
 import asyncio
 import subprocess
 import aiohttp
-import requests
-import random
 import yt_dlp
-import base64
-import secrets
 from dotenv import load_dotenv
 from aiohttp import web
 
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
-from telethon.errors import FloodWaitError
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
@@ -26,28 +20,17 @@ API_HASH     = os.getenv("API_HASH", "")
 BOT_TOKEN    = os.getenv("BOT_TOKEN", "")
 USER_SESSION = os.getenv("USER_SESSION", "")
 
-# ─── LOGIK BYPASS MANDIRI (FIX AUTO-GENERATE) ────────────────────
-PO_TOKEN     = "web+dummy_po_token_bypass_v1"
-VISITOR_DATA = ""
-
-def generate_visitor_data_lokal():
-    random_bytes = secrets.token_bytes(12)
-    encoded = base64.b64encode(random_bytes).decode('utf-8')
-    visitor = "Cg9leU" + encoded.replace('+', '-').replace('/', '_').replace('=', '')
-    return visitor
-# ─────────────────────────────────────────────────────────────────
-
 if not all([API_ID, API_HASH, BOT_TOKEN]):
-    raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada!")
+    raise ValueError("API_ID, API_HASH, BOT_TOKEN tidak ada di environment variable!")
 
 if not USER_SESSION:
-    raise ValueError("USER_SESSION tidak ada! Masukkan StringSession baru di Railway variables.")
+    raise ValueError("USER_SESSION tidak ada! Pastikan StringSession akun userbot sudah terisi.")
 
 DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Hapus semua sisa session lama biar gak kena invalid nonce hash
+# Bersihkan sisa session-file yang corrupt saat restart container
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     try:
         os.remove(f)
@@ -60,6 +43,7 @@ calls = None
 
 queues: dict      = {}
 now_playing: dict = {}
+_play_locks: dict = {}
 
 def get_queue(chat_id):
     if chat_id not in queues:
@@ -80,63 +64,13 @@ def cleanup_file(fp):
         except Exception:
             pass
 
-# ─── NEW ENGINE: PROXY SCRAPE REVOLUTION (FREE & AUTO UPDATE) ────
+# ─── YT-DLP ENGINE OPTIMIZATION (ANTI-BLOCK & DIRECT NETWORK) ───
 
-def get_dynamic_free_proxy():
-    proxy_pool = []
-    
-    # 🔥 GANTI GEONODE: Pakai API ProxyScrape gratisan (Highly Anonymized / Elite)
-    try:
-        url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=2000&country=all&ssl=all&anonymity=elite"
-        response = requests.get(url, timeout=4)
-        if response.status_code == 200 and response.text.strip():
-            proxies = response.text.strip().split("\r\n")
-            if not proxies or len(proxies) < 2:
-                proxies = response.text.strip().split("\n")
-            for p in proxies:
-                if p.strip():
-                    proxy_pool.append(f"http://{p.strip()}")
-    except Exception as e:
-        print(f"⚠️ ProxyScrape API timeout/error: {e}")
-
-    # Fallback ke GitHub list kalau ProxyScrape bermasalah
-    if not proxy_pool:
-        try:
-            fallback_url = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
-            resp = requests.get(fallback_url, timeout=3)
-            if resp.status_code == 200:
-                proxies = resp.text.strip().split("\n")
-                sampled = random.sample(proxies, min(30, len(proxies)))
-                for p in sampled:
-                    proxy_pool.append(f"http://{p.strip()}")
-        except Exception as e:
-            print(f"❌ Gagal ambil proxy backup dari GitHub: {e}")
-
-    if not proxy_pool:
-        return None
-
-    print(f"🔄 Memulai validasi dari {len(proxy_pool)} kandidat proxy baru...")
-    random.shuffle(proxy_pool)
-    
-    # Validasi kilat max 10 proxy teratas
-    for attempt, proxy_str in enumerate(proxy_pool[:10], 1):
-        try:
-            test_resp = requests.get("https://www.google.com", proxies={"http": proxy_str, "https": proxy_str}, timeout=1.5)
-            if test_resp.status_code == 200:
-                print(f"✅ Proxy OK (Percobaan {attempt}): {proxy_str}")
-                return proxy_str
-        except Exception:
-            continue
-
-    fallback_pick = random.choice(proxy_pool)
-    print(f"⚠️ Proxy lambat semua, terpaksa pakai nekat: {fallback_pick}")
-    return fallback_pick
-
-# ─── YT-DLP CONFIGURATIONS ───────────────────────────────────────
 _JS_KEY  = None
 _JS_PATH = None
 
-def get_ydl_opts(extra=None):
+def _init_js_runtime():
+    """Mendeteksi otomatis engine Javascript di container untuk bypass signature check"""
     global _JS_KEY, _JS_PATH
     if _JS_KEY is None:
         for binary in ["node", "deno", "bun"]:
@@ -148,16 +82,20 @@ def get_ydl_opts(extra=None):
             except Exception:
                 pass
 
+def get_ydl_opts(extra=None):
+    _init_js_runtime()
+    
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 8,  
+        "socket_timeout": 30,  # Ditambah durasinya agar stabil saat network spiking di cloud
         "noplaylist":      True,
         "ignoreerrors":    True,
-        "proxy":          get_dynamic_free_proxy(),  
+        "source_address": "0.0.0.0",  # Memaksa binding ke interface IPv4 lokal container
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android", "mweb", "web"],
+                # Menggunakan kombinasi client mobile yang kebal dari deteksi "Sign in to confirm you are not a bot"
+                "player_client": ["android", "ios", "mweb", "tv"],
             }
         },
         "postprocessors": [{
@@ -170,90 +108,69 @@ def get_ydl_opts(extra=None):
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         opts["cookiefile"] = COOKIES_FILE
 
-    if PO_TOKEN:
-        opts["extractor_args"]["youtube"]["po_token"] = [f"{PO_TOKEN}"]
-        if VISITOR_DATA:
-            opts["extractor_args"]["youtube"]["visitor_data"] = [VISITOR_DATA]
-
     if _JS_KEY:
         opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
 
     if extra:
-        if "extractor_args" in extra:
-            for k, v in extra.pop("extractor_args", {}).items():
-                if k in opts["extractor_args"]:
-                    opts["extractor_args"][k].update(v)
-                else:
-                    opts["extractor_args"][k] = v
+        if "extractor_args" in extra and "youtube" in extra["extractor_args"]:
+            opts["extractor_args"]["youtube"].update(extra["extractor_args"]["youtube"])
+            extra.pop("extractor_args")
         opts.update(extra)
 
     return opts
 
 
 def search_and_get_info(query: str) -> dict:
-    last_error = None
-    
-    # 🔥 OPTIMASI RETRY GALAK: 12 kali percobaan rotasi proxy murni
-    for run in range(1, 13):
-        proxy_current = get_dynamic_free_proxy()
-        print(f"🔍 Mencari info lagu (Percobaan {run}/12) menggunakan proxy: {proxy_current}")
-        
-        info_opts = {
-            "quiet":          True,
-            "no_warnings":    True,
-            "skip_download":  True,
-            "noplaylist":      True,
-            "default_search": "ytsearch1",
-            "ignoreerrors":    False,
-            "socket_timeout": 5, # 🔥 Potong jadi 5 detik biar responsif lewatin proxy mati
-            "proxy":          proxy_current,  
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["ios", "android", "mweb", "web"],
-                }
-            },
+    print(f"🚀 [DIRECT-ENGINE] Mencari info musik untuk: {query}")
+    _init_js_runtime()
+
+    info_opts = {
+        "quiet":          True,
+        "no_warnings":    True,
+        "skip_download":  True,
+        "noplaylist":      True,
+        "default_search": "ytsearch1",
+        "ignoreerrors":    False,
+        "socket_timeout": 30,
+        "source_address": "0.0.0.0",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "mweb", "tv"],
+            }
+        },
+    }
+
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        info_opts["cookiefile"] = COOKIES_FILE
+
+    if _JS_KEY:
+        info_opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
+
+    with yt_dlp.YoutubeDL(info_opts) as ydl:
+        info = ydl.extract_info(query, download=False)
+
+        if info is None:
+            raise Exception("YouTube merespon dengan data kosong (Empty Response).")
+
+        if "entries" in info:
+            entries = list(info["entries"])
+            if not entries:
+                raise Exception("Lagu tidak ditemukan pada hasil pencarian.")
+            info = entries[0]
+
+        if not info:
+            raise Exception("Gagal melakukan ekstraksi metadata video.")
+
+        url = info.get("webpage_url") or info.get("url", "")
+        if not url:
+            raise Exception("URL streaming video YouTube tidak valid.")
+
+        return {
+            "title":    info.get("title", "Unknown"),
+            "url":      url,
+            "duration": info.get("duration", 0),
+            "uploader": info.get("uploader", "Unknown"),
         }
-
-        if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-            info_opts["cookiefile"] = COOKIES_FILE
-
-        if PO_TOKEN:
-            info_opts["extractor_args"]["youtube"]["po_token"] = [f"{PO_TOKEN}"]
-            if VISITOR_DATA:
-                info_opts["extractor_args"]["youtube"]["visitor_data"] = [VISITOR_DATA]
-
-        try:
-            with yt_dlp.YoutubeDL(info_opts) as ydl:
-                info = ydl.extract_info(query, download=False)
-
-                if info is None:
-                    continue
-
-                if "entries" in info:
-                    entries = list(info["entries"])
-                    if not entries:
-                        continue
-                    info = entries[0]
-
-                if not info:
-                    continue
-
-                url = info.get("webpage_url") or info.get("url", "")
-                if not url:
-                    continue
-
-                return {
-                    "title":    info.get("title", "Unknown"),
-                    "url":      url,
-                    "duration": info.get("duration", 0),
-                    "uploader": info.get("uploader", "Unknown"),
-                }
-        except Exception as e:
-            print(f"⚠️ Percobaan {run}/12 gagal akibat error proxy: {e}")
-            last_error = e
-            continue
-
-    raise Exception(f"Gagal total setelah 12x ganti proxy. Error terakhir: {last_error}")
 
 
 def _convert_to_mp3(src: str, dest: str) -> str:
@@ -272,91 +189,95 @@ def download_audio(url: str, filename: str) -> str:
 
     cleanup_file(mp3_path)
 
-    print(f"⬇️ Memproses download via yt-dlp...")
-    try:
-        opts = get_ydl_opts({
-            "outtmpl": output_path + "._tmp.%(ext)s",
-        })
-        
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
+    print(f"⬇️ Memulai proses download audio via Direct Cloud Connection...")
+    opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
 
-        if os.path.exists(mp3_path):
-            return mp3_path
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
 
-        for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
-            fp = f"{output_path}._tmp.{ext}"
-            if os.path.exists(fp):
-                if ext == "mp3":
-                    os.rename(fp, mp3_path)
-                    return mp3_path
-                return _convert_to_mp3(fp, mp3_path)
+    if os.path.exists(mp3_path):
+        return mp3_path
 
-    except Exception as e:
-        print(f"⚠️ Proses download gagal/timeout: {e}")
+    for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
+        fp = f"{output_path}._tmp.{ext}"
+        if os.path.exists(fp):
+            if ext == "mp3":
+                os.rename(fp, mp3_path)
+                return mp3_path
+            return _convert_to_mp3(fp, mp3_path)
 
-    raise Exception("Koneksi proxy macet! Mencoba ulang otomatis...")
+    raise Exception("File audio gagal diunduh atau diblokir oleh YouTube.")
 
 
-# ─── PLAY LOGIC ──────────────────────────────────────────────────
+# ─── VOICE CHAT PLAY LOGIC ──────────────────────────────────────
 
 async def play_next(chat_id: int):
-    queue = get_queue(chat_id)
-    if not queue:
-        now_playing.pop(chat_id, None)
-        try:
-            await calls.leave_call(chat_id)
-        except Exception:
-            pass
-        try:
-            await bot.send_message(chat_id, "✅ Antrian habis, userbot keluar dari Voice Chat.")
-        except Exception:
-            pass
-        return
+    if chat_id not in _play_locks:
+        _play_locks[chat_id] = asyncio.Lock()
 
-    track = queue.pop(0)
-    now_playing[chat_id] = track
-    safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
-
-    msg = None
-    try:
-        msg = await bot.send_message(
-            chat_id,
-            f"▶️ **Now Playing**\n\n"
-            f"🎵 **{track['title']}**\n"
-            f"⏱ {fmt_duration(track['duration'])}\n"
-            f"⏳ *Sedang memproses audio (Anti-Stuck Aktif)...*",
-        )
-    except Exception as e:
-        print(f"send_message error: {e}")
-
-    try:
-        file_path = await asyncio.to_thread(
-            download_audio, track["url"], f"{chat_id}_{safe}"
-        )
-        
-        await calls.play(chat_id, MediaStream(file_path))
-        now_playing[chat_id]["file_path"] = file_path
-        
-        if msg:
+    async with _play_locks[chat_id]:
+        queue = get_queue(chat_id)
+        if not queue:
+            now_playing.pop(chat_id, None)
             try:
-                await msg.edit(f"▶️ **Playing:** `{track['title']}`\n🎵 Jalur streaming berhasil dibuka!")
+                await calls.leave_call(chat_id)
             except Exception:
                 pass
-    except Exception as e:
-        print(f"❌ Play error (Otomatis ganti proxy baru): {e}")
-        queue.insert(0, track)
-        await asyncio.sleep(2)
-        await play_next(chat_id) 
+            try:
+                await bot.send_message(chat_id, "✅ Antrian habis, bot keluar dari Voice Chat.")
+            except Exception:
+                pass
+            return
+
+        track = queue.pop(0)
+        now_playing[chat_id] = track
+        safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
+
+        msg = None
+        try:
+            msg = await bot.send_message(
+                chat_id,
+                f"▶️ **Now Playing**\n\n"
+                f"🎵 **{track['title']}**\n"
+                f"⏱ {fmt_duration(track['duration'])}\n"
+                f"⏳ *Sedang memproses file audio...*",
+            )
+        except Exception as e:
+            print(f"send_message error: {e}")
+
+        try:
+            file_path = await asyncio.wait_for(
+                asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"),
+                timeout=120
+            )
+
+            await calls.play(chat_id, MediaStream(file_path))
+            now_playing[chat_id]["file_path"] = file_path
+
+            if msg:
+                try:
+                    await msg.edit(f"▶️ **Playing:** `{track['title']}`\n🎵 Jalur streaming berhasil dibuka!")
+                except Exception:
+                    pass
+
+        except asyncio.TimeoutError:
+            print(f"❌ Timeout download: {track['title']}")
+            await bot.send_message(chat_id, f"❌ Timeout memproses `{track['title']}`. Skip otomatis ke antrian selanjutnya...")
+            asyncio.create_task(play_next(chat_id))
+
+        except Exception as e:
+            print(f"❌ Play error: {e}")
+            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}` akibat restriksi jaringan. Melanjutkan ke antrian berikutnya...")
+            asyncio.create_task(play_next(chat_id))
 
 
-# ─── REGISTER HANDLERS SYSTEM ───────────────────────────────────
+# ─── TELEGRAM HANDLERS SYSTEM ───────────────────────────────────
 
 def register_handlers(tg_bot):
     @tg_bot.on(events.NewMessage(pattern=r"^/start"))
     async def cmd_start(event):
         await event.respond(
-            "🎵 **Music Bot Engine V2 Ready**\n\n"
+            "🎵 **Music Bot Cloud-Direct Ready**\n\n"
             "▶️ `/play <lagu>` — putar lagu\n"
             "⏭ `/skip` — skip lagu\n"
             "📋 `/queue` — lihat antrian\n"
@@ -370,16 +291,22 @@ def register_handlers(tg_bot):
             query = query.strip()
 
         if not query:
-            await event.respond("❗ Contoh: `/play despacito`")
+            await event.respond("❗ Contoh penggunaan: `/play sisa rasa`")
             return
 
         chat_id = event.chat_id
-        status  = await event.respond(f"🔍 Merotasi proxy baru untuk mencari **{query}**...")
+        status  = await event.respond(f"🔍 Memproses request **{query}** via cloud engine...")
 
         try:
-            info = await asyncio.to_thread(search_and_get_info, query)
+            info = await asyncio.wait_for(
+                asyncio.to_thread(search_and_get_info, query),
+                timeout=45
+            )
+        except asyncio.TimeoutError:
+            await status.edit("❌ Waktu pencarian habis (Timeout). Server YouTube lambat merespon.")
+            return
         except Exception as e:
-            await status.edit(f"❌ Gagal mencari info (Semua proxy mati): {e}")
+            await status.edit(f"❌ Pencarian gagal: `{e}`")
             return
 
         get_queue(chat_id).append(info)
@@ -396,22 +323,22 @@ def register_handlers(tg_bot):
         )
 
         if chat_id not in now_playing:
-            await play_next(chat_id)
+            asyncio.create_task(play_next(chat_id))
 
     @tg_bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
     async def cmd_skip(event):
         chat_id = event.chat_id
         if chat_id not in now_playing:
-            await event.respond("❗ Tidak ada lagu yang sedang diputar.")
+            await event.respond("❗ Tidak ada musik yang sedang aktif diputar.")
             return
 
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-        await event.respond("⏭ Di-skip!")
+        await event.respond("⏭ Lagu berhasil dilewati!")
         try:
             await calls.leave_call(chat_id)
         except Exception:
             pass
-        await play_next(chat_id)
+        asyncio.create_task(play_next(chat_id))
 
     @tg_bot.on(events.NewMessage(pattern=r"^/queue(?:@\w+)?$", func=lambda e: e.is_group))
     async def cmd_queue(event):
@@ -419,15 +346,15 @@ def register_handlers(tg_bot):
         queue   = get_queue(chat_id)
 
         if not queue and chat_id not in now_playing:
-            await event.respond("📋 Antrian kosong.")
+            await event.respond("📋 Daftar antrian musik kosong.")
             return
 
-        text = "📋 **Antrian**\n\n"
+        text = "📋 **Daftar Antrian Musik**\n\n"
         if chat_id in now_playing:
             np = now_playing[chat_id]
-            text += f"▶️ **{np['title']}** — {fmt_duration(np['duration'])}\n\n"
+            text += f"▶️ **Now Playing:** `{np['title']}` — {fmt_duration(np['duration'])}\n\n"
         for i, t in enumerate(queue, 1):
-            text += f"{i}. {t['title']} — {fmt_duration(t['duration'])}\n"
+            text += f"{i}. `{t['title']}` — {fmt_duration(t['duration'])}\n"
         await event.respond(text)
 
     @tg_bot.on(events.NewMessage(pattern=r"^/stop(?:@\w+)?$", func=lambda e: e.is_group))
@@ -439,7 +366,7 @@ def register_handlers(tg_bot):
             await calls.leave_call(chat_id)
         except Exception:
             pass
-        await event.respond("⏹ Stop. Antrian dikosongkan.")
+        await event.respond("⏹ Pemutaran dihentikan dan daftar antrian dibersihkan.")
 
     @tg_bot.on(events.CallbackQuery)
     async def cb_handler(event):
@@ -447,7 +374,7 @@ def register_handlers(tg_bot):
         if data.startswith("skip_"):
             chat_id = int(data.split("_")[1])
             if chat_id not in now_playing:
-                await event.answer("Tidak ada lagu.", alert=True)
+                await event.answer("Tidak ada lagu yang diputar.", alert=True)
                 return
             await event.answer("⏭ Skip!")
             cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
@@ -455,7 +382,19 @@ def register_handlers(tg_bot):
                 await calls.leave_call(chat_id)
             except Exception:
                 pass
-            await play_next(chat_id)
+            asyncio.create_task(play_next(chat_id))
+        elif data.startswith("queue_"):
+            chat_id = int(data.split("_")[1])
+            queue   = get_queue(chat_id)
+            if not queue and chat_id not in now_playing:
+                await event.answer("Daftar antrian kosong.", alert=True)
+                return
+            text = "📋 **Antrian Saat Ini**\n\n"
+            if chat_id in now_playing:
+                text += f"▶️ `{now_playing[chat_id]['title']}`\n\n"
+            for i, t in enumerate(queue, 1):
+                text += f"{i}. `{t['title']}`\n"
+            await event.respond(text)
 
 
 async def on_stream_end_handler(client, update):
@@ -463,15 +402,15 @@ async def on_stream_end_handler(client, update):
         return
     chat_id = update.chat_id
     cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
-    await play_next(chat_id)
+    asyncio.create_task(play_next(chat_id))
 
 
-# ─── MAIN ────────────────────────────────────────────────────────
+# ─── CORE RUNNER SYSTEM ─────────────────────────────────────────
 
 async def main():
-    global PO_TOKEN, VISITOR_DATA, bot, user, calls
+    global bot, user, calls
 
-    print("🚀 Starting bot...")
+    print("🚀 Inisialisasi container bot...")
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
@@ -479,7 +418,6 @@ async def main():
     except Exception:
         pass
 
-    VISITOR_DATA = generate_visitor_data_lokal()
     bot   = TelegramClient("bot_session", API_ID, API_HASH)
     user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
     calls = PyTgCalls(user)
@@ -499,7 +437,7 @@ async def main():
     runner = web.AppRunner(server)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
-    print("✅ Bot siap!")
+    print("✅ Bot siap! Menunggu request command...")
 
     while True:
         try:
