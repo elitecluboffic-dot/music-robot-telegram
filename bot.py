@@ -14,6 +14,7 @@ from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
+from pytgcalls.types import HighQualityAudio  # 🔥 FIX ENGINE AUDIO AUDIO HD
 
 load_dotenv()
 
@@ -91,24 +92,33 @@ def get_ydl_opts(extra=None):
         "no_warnings":    True,
         "socket_timeout": 60,
         "noplaylist":      True,
-        "ignoreerrors":   False,  # Ubah ke False agar jika error format terdeteksi di awal
+        "ignoreerrors":   False,
         "source_address": "0.0.0.0",
         
-        # 🔥 ULTRA FIX: Minta format audio paling fleksibel untuk hindari "format not available"
         "format":         "bestaudio/best",
-        
         "keepvideo":      False,
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
+        
+        # 🔥 BYPASS ENGINE HEADERS
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Sec-Fetch-Mode": "navigate",
+        },
+        
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android", "tvhtml5"],
+                "player_client": ["web", "tvhtml5"],
+                "po_token": ["web+web_embedded_player"],
             }
         },
+        # 🔥 FIX AUDIO ENGINE: Ubah ke OPUS dengan kualitas kompresi tinggi (192k)
         "postprocessors": [{
             "key":              "FFmpegExtractAudio",
-            "preferredcodec":   "mp3",
-            "preferredquality": "128",
+            "preferredcodec":   "opus",
+            "preferredquality": "192",
         }],
     }
     cookie_path = get_active_cookie_file()
@@ -133,14 +143,17 @@ def search_and_get_info(query: str) -> dict:
         "socket_timeout": 60,
         "source_address": "0.0.0.0",
         
-        # Samakan strategi format pencarian 
         "format":         "bestaudio/best",
-        
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
+        
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android", "tvhtml5"],
+                "player_client": ["web", "tvhtml5"],
+                "po_token": ["web+web_embedded_player"],
             }
         },
     }
@@ -157,25 +170,31 @@ def search_and_get_info(query: str) -> dict:
         url = info.get("webpage_url") or info.get("url", "")
         return {"title": info.get("title", "Unknown"), "url": url, "duration": info.get("duration", 0), "uploader": info.get("uploader", "Unknown")}
 
-def _convert_to_mp3(src: str, dest: str) -> str:
-    subprocess.run(["ffmpeg", "-y", "-i", src, "-vn", "-ar", "44100", "-ac", "2", "-b:a", "128k", dest], check=True, capture_output=True)
+# 🔥 FIX AUDIO ENGINE: Memaksa encoding audio ke standar VoIP Telegram (48kHz Stereo)
+def _convert_to_opus(src: str, dest: str) -> str:
+    subprocess.run([
+        "ffmpeg", "-y", "-i", src, 
+        "-vn", "-acodec", "libopus", 
+        "-ar", "48000", "-ac", "2", 
+        "-b:a", "192k", dest
+    ], check=True, capture_output=True)
     cleanup_file(src)
     return dest
 
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
-    mp3_path    = output_path + ".mp3"
-    cleanup_file(mp3_path)
+    opus_path    = output_path + ".opus"
+    cleanup_file(opus_path)
     opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
     with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([url])
-    if os.path.exists(mp3_path): return mp3_path
-    for ext in ["mp3", "m4a", "webm", "opus", "mp4", "aac"]:
+    if os.path.exists(opus_path): return opus_path
+    for ext in ["opus", "webm", "m4a", "mp3", "mp4", "aac"]:
         fp = f"{output_path}._tmp.{ext}"
         if os.path.exists(fp):
-            if ext == "mp3":
-                os.rename(fp, mp3_path)
-                return mp3_path
-            return _convert_to_mp3(fp, mp3_path)
+            if ext == "opus":
+                os.rename(fp, opus_path)
+                return opus_path
+            return _convert_to_opus(fp, opus_path)
     raise Exception("File audio gagal diunduh.")
 
 async def play_next(chat_id: int):
@@ -197,7 +216,16 @@ async def play_next(chat_id: int):
         except: pass
         try:
             file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=120)
-            await calls.play(chat_id, MediaStream(file_path))
+            
+            # 🔥 FIX AUDIO ENGINE: Paksa bypass noise suppression bawaan Telegram biar suara stabil ga gede kecil
+            await calls.play(
+                chat_id, 
+                MediaStream(
+                    file_path,
+                    audio_parameters=HighQualityAudio()
+                )
+            )
+            
             now_playing[chat_id]["file_path"] = file_path
             if msg:
                 try: await msg.edit(f"▶️ **Playing:** `{track['title']}`\n🎵 Jalur streaming berhasil dibuka!")
@@ -305,7 +333,6 @@ async def main():
             await session.get(url)
     except: pass
 
-    # Gunakan catch-up=False untuk menangani problem desinkronisasi timestamp saat restart
     bot   = TelegramClient("bot_session", API_ID, API_HASH, catch_up=False)
     user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH, catch_up=False)
     calls = PyTgCalls(user)
