@@ -14,7 +14,7 @@ from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
-from pytgcalls.types import AudioQuality  # 🔥 ULTRA FIX: Menggunakan Enum standard terbaru v2.x/v3.x
+from pytgcalls.types import AudioQuality  # 🔥 FIX LENGKAP: Menggunakan Enum standard terbaru v2.x/v3.x
 
 load_dotenv()
 
@@ -95,6 +95,7 @@ def get_ydl_opts(extra=None):
         "ignoreerrors":   False,
         "source_address": "0.0.0.0",
         
+        # 🔥 FIX: Diperbolehkan mengambil semua format audio terbaik agar tidak melemparkan 'format not available'
         "format":         "bestaudio/best",
         "keepvideo":      False,
         "proxy":          PROXY_URL,
@@ -114,12 +115,6 @@ def get_ydl_opts(extra=None):
                 "po_token": ["web+web_embedded_player"],
             }
         },
-        # 🔥 FIX AUDIO ENGINE: Ubah ke OPUS kualitas studio (192k) standar VoIP
-        "postprocessors": [{
-            "key":              "FFmpegExtractAudio",
-            "preferredcodec":   "opus",
-            "preferredquality": "192",
-        }],
     }
     cookie_path = get_active_cookie_file()
     if cookie_path: opts["cookiefile"] = cookie_path
@@ -170,7 +165,7 @@ def search_and_get_info(query: str) -> dict:
         url = info.get("webpage_url") or info.get("url", "")
         return {"title": info.get("title", "Unknown"), "url": url, "duration": info.get("duration", 0), "uploader": info.get("uploader", "Unknown")}
 
-# 🔥 FIX AUDIO ENGINE: Memaksa encoding audio ke standar VoIP Telegram (48kHz Stereo Opus)
+# 🔥 FIX AUDIO ENGINE: Memaksa encoding audio ke standar VoIP Telegram (48kHz Stereo Opus) via FFmpeg
 def _convert_to_opus(src: str, dest: str) -> str:
     subprocess.run([
         "ffmpeg", "-y", "-i", src, 
@@ -217,7 +212,7 @@ async def play_next(chat_id: int):
         try:
             file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=120)
             
-            # 🔥 FIX AUDIO ENGINE V2: Pakai AudioQuality.STUDIO (Bypass Noise Suppression & HD Audio)
+            # 🔥 FIX AUDIO ENGINE V2: Pakai AudioQuality.STUDIO bawaan versi terbaru
             await calls.play(
                 chat_id, 
                 MediaStream(
