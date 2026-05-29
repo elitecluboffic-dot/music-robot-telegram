@@ -14,3 +14,6 @@ aiohttp
 
 # Library untuk Hit API Proxy Geonode & GitHub Fallback
 requests
+
+# Library Generator OTP & Keamanan Verifikasi Dua Langkah
+pyotp
