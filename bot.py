@@ -4,6 +4,7 @@ import asyncio
 import subprocess
 import aiohttp
 import yt_dlp
+import random
 from dotenv import load_dotenv
 from aiohttp import web
 
@@ -64,7 +65,7 @@ def cleanup_file(fp):
         except Exception:
             pass
 
-# ─── YT-DLP ENGINE OPTIMIZATION (ANTI-BLOCK & DIRECT NETWORK) ───
+# ─── YT-DLP ENGINE OPTIMIZATION (ANTI-BLOCK & ROTATION SYSTEM) ───
 
 _JS_KEY  = None
 _JS_PATH = None
@@ -82,6 +83,20 @@ def _init_js_runtime():
             except Exception:
                 pass
 
+def get_active_cookie_file() -> str:
+    """Mendeteksi cookie utama atau otomatis merotasi ke cookie cadangan jika tersedia"""
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        return COOKIES_FILE
+    
+    # Mencari file cadangan seperti cookies1.txt, cookies_backup.txt, dll.
+    backup_cookies = [f for f in glob.glob("cookies*.txt") if os.path.getsize(f) > 0]
+    if backup_cookies:
+        selected_cookie = random.choice(backup_cookies)
+        print(f"🔄 [COOKIE ENGINE] Menggunakan file cookie cadangan: {selected_cookie}")
+        return selected_cookie
+        
+    return ""
+
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     
@@ -92,6 +107,7 @@ def get_ydl_opts(extra=None):
         "noplaylist":      True,
         "ignoreerrors":    True,
         "source_address": "0.0.0.0",  # Memaksa binding ke interface IPv4 lokal container
+        "format":         "bestaudio/best",  # FIX: Memastikan audio terbaik ditarik tanpa error format filter
         "extractor_args": {
             "youtube": {
                 # Menggunakan kombinasi client mobile yang kebal dari deteksi "Sign in to confirm you are not a bot"
@@ -105,8 +121,9 @@ def get_ydl_opts(extra=None):
         }],
     }
 
-    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-        opts["cookiefile"] = COOKIES_FILE
+    cookie_path = get_active_cookie_file()
+    if cookie_path:
+        opts["cookiefile"] = cookie_path
 
     if _JS_KEY:
         opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
@@ -133,6 +150,7 @@ def search_and_get_info(query: str) -> dict:
         "ignoreerrors":    False,
         "socket_timeout": 30,
         "source_address": "0.0.0.0",
+        "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "tv"],
@@ -140,8 +158,9 @@ def search_and_get_info(query: str) -> dict:
         },
     }
 
-    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-        info_opts["cookiefile"] = COOKIES_FILE
+    cookie_path = get_active_cookie_file()
+    if cookie_path:
+        info_opts["cookiefile"] = cookie_path
 
     if _JS_KEY:
         info_opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
