@@ -44,7 +44,7 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-PROXY_URL = "http://cfzmnytb:dycnaq7a4ps1@84.247.60.125:6095"
+PROXY_URL = "http://cfzmnytb:dycnaq7a4ps1@191.96.254.138:6185"
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
