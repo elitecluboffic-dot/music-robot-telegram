@@ -107,12 +107,12 @@ def get_ydl_opts(extra=None):
         "noplaylist":      True,
         "ignoreerrors":    True,
         "source_address": "0.0.0.0",  
-        # FIX ULTIMATE: Menggunakan format fallback bertingkat demi menghindari "format not available"
         "format":         "bestaudio/best",
-        "keepvideo":      False, # Otomatis buang video setelah didownload jika terpaksa mengambil stream campuran
+        "keepvideo":      False, 
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb", "tv"],
+                # Menggunakan client TV & Web untuk download stream audio stabil
+                "player_client": ["tvhtml5", "web", "mweb"],
             }
         },
         "postprocessors": [{
@@ -151,11 +151,12 @@ def search_and_get_info(query: str) -> dict:
         "ignoreerrors":    False,
         "socket_timeout": 30,
         "source_address": "0.0.0.0",
-        # FIX ULTIMATE: Izinkan yt-dlp mengambil format apa saja saat ekstraksi informasi awal
         "format":         "bestaudio/best",
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb", "tv"],
+                # FIX UTAMA: Buang 'android' & 'ios' karena memicu block format di IP Cloud. 
+                # Pakai tvhtml5 dan web yang jauh lebih kebal bypass.
+                "player_client": ["tvhtml5", "web", "mweb"],
             }
         },
     }
@@ -384,6 +385,7 @@ def register_handlers(tg_bot):
         queues[chat_id] = []
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
         try:
+            
             await calls.leave_call(chat_id)
         except Exception:
             pass
