@@ -46,6 +46,10 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
+# ─── CONFIG PROXY PRIVAT LU ─────────────────────────────────────
+# Format: http://username:password@IP:port
+PROXY_URL = "http://cfzmnytb:dycnaq7a4ps1@209.127.138.10:5784"
+
 def get_queue(chat_id):
     if chat_id not in queues:
         queues[chat_id] = []
@@ -103,15 +107,15 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 30,  
+        "socket_timeout": 60,  
         "noplaylist":      True,
         "ignoreerrors":    True,
         "source_address": "0.0.0.0",  
         "format":         "bestaudio/best",
         "keepvideo":      False, 
         
-        # ─── PROXY ENGINE INTEGRATION ───
-        "proxy":          "https://139.59.105.64:8080",
+        # Integration Private Proxy
+        "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         
         "extractor_args": {
@@ -153,12 +157,12 @@ def search_and_get_info(query: str) -> dict:
         "noplaylist":      True,
         "default_search": "ytsearch1",
         "ignoreerrors":    False,
-        "socket_timeout": 30,
+        "socket_timeout": 60,
         "source_address": "0.0.0.0",
         "format":         "bestaudio/best",
         
-        # ─── PROXY ENGINE INTEGRATION ───
-        "proxy":          "https://139.59.105.64:8080",
+        # Integration Private Proxy
+        "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         
         "extractor_args": {
@@ -329,10 +333,10 @@ def register_handlers(tg_bot):
         try:
             info = await asyncio.wait_for(
                 asyncio.to_thread(search_and_get_info, query),
-                timeout=45
+                timeout=90  # 90 detik toleransi untuk proxy
             )
         except asyncio.TimeoutError:
-            await status.edit("❌ Waktu pencarian habis (Timeout). Server YouTube lambat merespon.")
+            await status.edit("❌ Waktu pencarian habis (Timeout). Koneksi proxy lambat merespon.")
             return
         except Exception as e:
             await status.edit(f"❌ Pencarian gagal: `{e}`")
