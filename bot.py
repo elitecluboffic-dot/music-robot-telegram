@@ -32,10 +32,10 @@ if not USER_SESSION:
     raise ValueError("USER_SESSION tidak ada! Pastikan StringSession akun userbot sudah terisi.")
 
 DOWNLOAD_DIR = "downloads"
-COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-for f in glob.glob("*.session") + glob.glob("*.session-journal"):
+# 🔥 BUMI HANGUSKAN COOKIES LAMA BIAR TIDAK MENGGANGGU OAUTH ENGINE!
+for f in glob.glob("*.session") + glob.glob("*.session-journal") + glob.glob("cookies*.txt"):
     try: os.remove(f)
     except: pass
 
@@ -77,41 +77,26 @@ def _init_js_runtime():
                     break
             except: pass
 
-def get_active_cookie_file() -> str:
-    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0: return COOKIES_FILE
-    backup_cookies = [f for f in glob.glob("cookies*.txt") if os.path.getsize(f) > 0]
-    if backup_cookies: return random.choice(backup_cookies)
-    return ""
-
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
-        "quiet":          False,  # 🔥 DIUBAH KE FALSE: Biar lu bisa ngeliat KODE OAUTH yang muncul di log container!
+        "quiet":          False,  # 🔥 WAJIB FALSE biar kode registrasi Google muncul di terminal!
         "no_warnings":    False,
         "socket_timeout": 60,
         "noplaylist":      True,
-        "ignoreerrors":   True,
-        "format":         "ba/b", 
+        "ignoreerrors":   False, # Ubah ke False biar kalau crash langsung ketahuan error aslinya apa
+        "format":         "bestaudio/best", 
         "keepvideo":      False,
     }
     
-    opts["http_headers"] = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-    }
-    
-    # 🔥 OAUTH INJECTION: Memaksa yt-dlp meminta otorisasi akun Google via device link
+    # 🔥 PURE OAUTH TV CLIENT ONLY (Menghindari block GVS PO Token iOS)
     opts["extractor_args"] = {
         "youtube": {
-            "player_client": ["mweb", "ios"],
-            "skip": ["dash", "hls"],
-            "oauth": True  # 🚀 NYALAKAN OTENTIKASI AKUN DI SINI
+            "player_client": ["tv", "web"],
+            "oauth": True
         }
     }
     
-    cookie_path = get_active_cookie_file()
-    if cookie_path: opts["cookiefile"] = cookie_path
     if _JS_KEY: opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
     if extra:
         if "extractor_args" in extra and "youtube" in extra["extractor_args"]:
@@ -130,11 +115,11 @@ def search_and_get_info(query: str) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(query, download=False)
         if info is None: 
-            raise Exception("YouTube memblokir koneksi IP ini (Respon Kosong).")
+            raise Exception("YouTube memberikan respon kosong.")
         if "entries" in info:
             entries = list(info["entries"])
             if not entries or entries[0] is None: 
-                raise Exception("Lagu tidak ditemukan atau IP diblokir Captcha.")
+                raise Exception("Lagu tidak ditemukan.")
             info = entries[0]
         url = info.get("webpage_url") or info.get("url", "")
         return {"title": info.get("title", "Unknown"), "url": url, "duration": info.get("duration", 0), "uploader": info.get("uploader", "Unknown")}
@@ -168,7 +153,7 @@ def download_audio(url: str, filename: str) -> str:
                 return opus_path
             return _convert_to_opus(fp, opus_path)
             
-    raise Exception("YouTube memblokir download stream di IP ini.")
+    raise Exception("Gagal mengekstrak file audio audio dari YouTube.")
 
 async def play_next(chat_id: int):
     if chat_id not in _play_locks: _play_locks[chat_id] = asyncio.Lock()
