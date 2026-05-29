@@ -103,14 +103,13 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 30,  # Ditambah durasinya agar stabil saat network spiking di cloud
+        "socket_timeout": 30,  
         "noplaylist":      True,
         "ignoreerrors":    True,
-        "source_address": "0.0.0.0",  # Memaksa binding ke interface IPv4 lokal container
-        "format":         "bestaudio/best",  # FIX: Memastikan audio terbaik ditarik tanpa error format filter
+        "source_address": "0.0.0.0",  
+        "format":         "bestaudio/best",  # Tetap pertahankan format audio terbaik untuk download
         "extractor_args": {
             "youtube": {
-                # Menggunakan kombinasi client mobile yang kebal dari deteksi "Sign in to confirm you are not a bot"
                 "player_client": ["android", "ios", "mweb", "tv"],
             }
         },
@@ -150,7 +149,7 @@ def search_and_get_info(query: str) -> dict:
         "ignoreerrors":    False,
         "socket_timeout": 30,
         "source_address": "0.0.0.0",
-        "format":         "bestaudio/best",  # FIX: Samakan format filter agar pencarian info akurat
+        # FIX: Opsi "format" sengaja dihapus di sini supaya yt-dlp ga rewel saat ambil metadata info video/Shorts
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "tv"],
