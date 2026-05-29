@@ -109,9 +109,13 @@ def get_ydl_opts(extra=None):
         "source_address": "0.0.0.0",  
         "format":         "bestaudio/best",
         "keepvideo":      False, 
+        
+        # ─── PROXY ENGINE INTEGRATION ───
+        "proxy":          "https://139.59.105.64:8080",
+        "noproxy":        "localhost,127.0.0.1",
+        
         "extractor_args": {
             "youtube": {
-                # Menggunakan client TV & Web untuk download stream audio stabil
                 "player_client": ["tvhtml5", "web", "mweb"],
             }
         },
@@ -152,10 +156,13 @@ def search_and_get_info(query: str) -> dict:
         "socket_timeout": 30,
         "source_address": "0.0.0.0",
         "format":         "bestaudio/best",
+        
+        # ─── PROXY ENGINE INTEGRATION ───
+        "proxy":          "https://139.59.105.64:8080",
+        "noproxy":        "localhost,127.0.0.1",
+        
         "extractor_args": {
             "youtube": {
-                # FIX UTAMA: Buang 'android' & 'ios' karena memicu block format di IP Cloud. 
-                # Pakai tvhtml5 dan web yang jauh lebih kebal bypass.
                 "player_client": ["tvhtml5", "web", "mweb"],
             }
         },
@@ -385,7 +392,6 @@ def register_handlers(tg_bot):
         queues[chat_id] = []
         cleanup_file(now_playing.pop(chat_id, {}).get("file_path"))
         try:
-            
             await calls.leave_call(chat_id)
         except Exception:
             pass
