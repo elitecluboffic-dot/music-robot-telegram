@@ -11,7 +11,7 @@ from aiohttp import web
 
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
-from telethon.errors import FloodWaitError  # 🔥 FIX ERROR COOLDOWN
+from telethon.errors import FloodWaitError
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
@@ -46,8 +46,8 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-# 🔥 JALUR PENYELAMATAN YOUTUBE: Kosongkan ("") jika proxy lu dirasa bikin buntu
-PROXY_URL = "http://hhumibam:9h6wl3nko9hd@84.247.60.125:6095"
+# 🔥 PROXY DIHAPUS TOTAL BIAR PAKAI IP ASLI VPS LU YANG BERSIH!
+PROXY_URL = ""
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
@@ -96,10 +96,6 @@ def get_ydl_opts(extra=None):
         "keepvideo":      False,
     }
     
-    if PROXY_URL:
-        opts["proxy"] = PROXY_URL
-        opts["noproxy"] = "localhost,127.0.0.1"
-        
     opts["http_headers"] = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -133,7 +129,7 @@ def search_and_get_info(query: str) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(query, download=False)
         if info is None: 
-            raise Exception("YouTube memblokir koneksi IP/Proxy ini (Respon Kosong).")
+            raise Exception("YouTube memblokir koneksi IP ini (Respon Kosong).")
         if "entries" in info:
             entries = list(info["entries"])
             if not entries or entries[0] is None: 
@@ -332,7 +328,6 @@ async def main():
             await asyncio.sleep(e.seconds)
             await user.start()
 
-    # 🔥 FIX COOLDOWN: Bungkus start bot dengan logic penahan FloodWaitError
     try:
         await bot.start(bot_token=BOT_TOKEN)
     except FloodWaitError as e:
