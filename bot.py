@@ -14,7 +14,7 @@ from telethon.sessions import StringSession
 
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream, StreamEnded
-from pytgcalls.types import AudioQuality  # 🔥 FIX LENGKAP: Menggunakan Enum standard terbaru v2.x/v3.x
+from pytgcalls.types import AudioQuality
 
 load_dotenv()
 
@@ -34,12 +34,9 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Sembuhkan berkas session sisa crash terdahulu penyebab desinkronisasi timestamp
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
-    try: 
-        os.remove(f)
-    except: 
-        pass
+    try: os.remove(f)
+    except: pass
 
 bot   = None
 user  = None
@@ -48,7 +45,8 @@ queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
 
-PROXY_URL = "http://hhumibam:9h6wl3nko9hd@64.137.10.153:5803"
+# 🔥 OPSIONAL: Jika setelah pakai kode ini masih error, kosongkan PROXY_URL (PROXY_URL = "") biar pakai IP asli VPS lu!
+PROXY_URL = "http://hhumibam:9h6wl3nko9hd@191.96.254.138:6185"
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
@@ -90,32 +88,33 @@ def get_ydl_opts(extra=None):
     opts = {
         "quiet":          True,
         "no_warnings":    True,
-        "socket_timeout": 60,
+        "socket_timeout": 30,
         "noplaylist":      True,
         "ignoreerrors":   True,
-        "source_address": "0.0.0.0",
         
-        # 🔥 ULTRA FIX FORMAT: Ambil apa aja yang ada (bisa video sekalian, nanti ffmpeg yang saring audionya)
-        # Ini bypass mutlak kalau format 'bestaudio' di-hidden sama YouTube di IP proxy lu
-        "format":         "bestaudio/best/mp4/webm/3gp/flv/avi",
+        # 🔥 HANCURKAN FORMAT RESTRICTION: Biarkan yt-dlp secara internal mencari manifest default terbaik
+        "format":         "ba/b", 
         "keepvideo":      False,
-        "proxy":          PROXY_URL,
-        "noproxy":        "localhost,127.0.0.1",
-        
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Android; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.5",
-        },
-        
-        # 🔥 SPOOFING CLIENT BARU: Pake kombinasi android & ios app client biar tembus manifest-nya
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios"],
-                "skip": ["dash", "hls"],
-            }
-        },
     }
+    
+    if PROXY_URL:
+        opts["proxy"] = PROXY_URL
+        opts["noproxy"] = "localhost,127.0.0.1"
+        
+    opts["http_headers"] = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+    
+    # 🔥 CLIENT SPOOFING REVOLUTION: Paksa pakai mweb/ios secara clean tanpa dash limit
+    opts["extractor_args"] = {
+        "youtube": {
+            "player_client": ["mweb", "ios"],
+            "skip": ["dash", "hls"]
+        }
+    }
+    
     cookie_path = get_active_cookie_file()
     if cookie_path: opts["cookiefile"] = cookie_path
     if _JS_KEY: opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
@@ -128,43 +127,23 @@ def get_ydl_opts(extra=None):
 
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
-    info_opts = {
-        "quiet":          True,
-        "no_warnings":    True,
+    opts = get_ydl_opts({
         "skip_download":  True,
-        "noplaylist":      True,
-        "default_search": "ytsearch1",
-        "ignoreerrors":   True,
-        "socket_timeout": 60,
-        "source_address": "0.0.0.0",
-        
-        "format":         "bestaudio/best/mp4/webm/3gp/flv/avi",
-        "proxy":          PROXY_URL,
-        "noproxy":        "localhost,127.0.0.1",
-        
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Android; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
-        },
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios"],
-            }
-        },
-    }
-    cookie_path = get_active_cookie_file()
-    if cookie_path: info_opts["cookiefile"] = cookie_path
-    if _JS_KEY: info_opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
-    with yt_dlp.YoutubeDL(info_opts) as ydl:
+        "default_search": "ytsearch1"
+    })
+    
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(query, download=False)
-        if info is None: raise Exception("YouTube merespon dengan data kosong.")
+        if info is None: 
+            raise Exception("YouTube memblokir koneksi IP/Proxy ini (Respon Kosong).")
         if "entries" in info:
             entries = list(info["entries"])
-            if not entries: raise Exception("Lagu tidak ditemukan.")
+            if not entries or entries[0] is None: 
+                raise Exception("Lagu tidak ditemukan atau IP diblokir Captcha.")
             info = entries[0]
         url = info.get("webpage_url") or info.get("url", "")
         return {"title": info.get("title", "Unknown"), "url": url, "duration": info.get("duration", 0), "uploader": info.get("uploader", "Unknown")}
 
-# 🔥 FIX AUDIO ENGINE: Memaksa encoding audio ke standar VoIP Telegram (48kHz Stereo Opus) via FFmpeg
 def _convert_to_opus(src: str, dest: str) -> str:
     subprocess.run([
         "ffmpeg", "-y", "-i", src, 
@@ -179,19 +158,23 @@ def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     opus_path    = output_path + ".opus"
     cleanup_file(opus_path)
+    
     opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
-    with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([url])
+    with yt_dlp.YoutubeDL(opts) as ydl: 
+        ydl.download([url])
+        
     if os.path.exists(opus_path): return opus_path
     
-    # Deteksi ekstensi file apa pun hasil download tadi, langsung sikat masukin FFmpeg
-    for ext in ["opus", "webm", "m4a", "mp3", "mp4", "aac", "3gp", "flv"]:
+    # Ambil ekstensi apa pun yang berhasil lolos didownload
+    for ext in ["opus", "webm", "m4a", "mp3", "mp4", "aac", "3gp"]:
         fp = f"{output_path}._tmp.{ext}"
         if os.path.exists(fp):
             if ext == "opus":
                 os.rename(fp, opus_path)
                 return opus_path
             return _convert_to_opus(fp, opus_path)
-    raise Exception("File audio gagal diunduh atau kosong.")
+            
+    raise Exception("YouTube memblokir download stream di IP ini.")
 
 async def play_next(chat_id: int):
     if chat_id not in _play_locks: _play_locks[chat_id] = asyncio.Lock()
