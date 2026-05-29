@@ -150,7 +150,7 @@ def search_and_get_info(query: str) -> dict:
         "ignoreerrors":    False,
         "socket_timeout": 30,
         "source_address": "0.0.0.0",
-        "format":         "bestaudio/best",
+        "format":         "bestaudio/best",  # FIX: Samakan format filter agar pencarian info akurat
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "mweb", "tv"],
