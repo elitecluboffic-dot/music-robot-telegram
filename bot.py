@@ -84,10 +84,30 @@ def get_active_cookie_file() -> str:
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
-        "quiet": True, "no_warnings": True, "socket_timeout": 60, "noplaylist": True, "ignoreerrors": True,
-        "source_address": "0.0.0.0", "format": "bestaudio/best", "keepvideo": False, "proxy": PROXY_URL, "noproxy": "localhost,127.0.0.1",
-        "extractor_args": {"youtube": {"player_client": ["tvhtml5", "web", "mweb"]}},
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "128"}],
+        "quiet":          True,
+        "no_warnings":    True,
+        "socket_timeout": 60,
+        "noplaylist":     True,
+        "ignoreerrors":   True,
+        "source_address": "0.0.0.0",
+        
+        # 🔥 FIX ENGINE: Fallback format berlapis anti-empty format dari YouTube
+        "format":         "bestaudio/best/worstvideo+bestaudio/bestvideo+bestaudio/worst",
+        
+        "keepvideo":      False,
+        "proxy":          PROXY_URL,
+        "noproxy":        "localhost,127.0.0.1",
+        "extractor_args": {
+            "youtube": {
+                # 🔥 FIX ENGINE: Menggunakan mobile & TV clients bypass restriksi server
+                "player_client": ["ios", "android", "tvhtml5"],
+            }
+        },
+        "postprocessors": [{
+            "key":              "FFmpegExtractAudio",
+            "preferredcodec":   "mp3",
+            "preferredquality": "128",
+        }],
     }
     cookie_path = get_active_cookie_file()
     if cookie_path: opts["cookiefile"] = cookie_path
@@ -102,9 +122,25 @@ def get_ydl_opts(extra=None):
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
     info_opts = {
-        "quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True, "default_search": "ytsearch1",
-        "ignoreerrors": False, "socket_timeout": 60, "source_address": "0.0.0.0", "format": "bestaudio/best", "proxy": PROXY_URL, "noproxy": "localhost,127.0.0.1",
-        "extractor_args": {"youtube": {"player_client": ["tvhtml5", "web", "mweb"]}},
+        "quiet":          True,
+        "no_warnings":    True,
+        "skip_download":  True,
+        "noplaylist":     True,
+        "default_search": "ytsearch1",
+        "ignoreerrors":   False,
+        "socket_timeout": 60,
+        "source_address": "0.0.0.0",
+        
+        # Samakan strategi format pencarian dengan opsi download utama
+        "format":         "bestaudio/best/worstvideo+bestaudio/bestvideo+bestaudio/worst",
+        
+        "proxy":          PROXY_URL,
+        "noproxy":        "localhost,127.0.0.1",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "android", "tvhtml5"],
+            }
+        },
     }
     cookie_path = get_active_cookie_file()
     if cookie_path: info_opts["cookiefile"] = cookie_path
@@ -242,7 +278,6 @@ async def on_stream_end_handler(client, update):
 # ─── CORE RUNNER SYSTEM ─────────────────────────────────────────
 
 def generate_otp_or_password(secret: str) -> str:
-    """Fungsi ini dipanggil secara dinamis setelah pyotp dipastikan terinstal"""
     if not secret: return ""
     try:
         import pyotp
@@ -255,14 +290,12 @@ async def main():
     global bot, user, calls
     print("🚀 Inisialisasi container bot...")
     
-    # ─── RUNTIME AUTO-INSTALL ENGINE (DIKUNCI PAS RUNTIME START) ───
     try:
         import pyotp
     except ImportError:
         print("📦 [SYSTEM] pyotp tidak terdeteksi di cache, memaksa instalasi via runtime...")
         process = subprocess.run([sys.executable, "-m", "pip", "install", "pyotp"], capture_output=True, text=True)
         print(process.stdout)
-    # ───────────────────────────────────────────────────────────────
 
     try:
         async with aiohttp.ClientSession() as session:
