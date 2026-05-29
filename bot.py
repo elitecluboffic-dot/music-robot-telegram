@@ -33,9 +33,12 @@ DOWNLOAD_DIR = "downloads"
 COOKIES_FILE = "cookies.txt"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# Sembuhkan berkas session sisa crash terdahulu penyebab desinkronisasi timestamp
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
-    try: os.remove(f)
-    except: pass
+    try: 
+        os.remove(f)
+    except: 
+        pass
 
 bot   = None
 user  = None
@@ -87,19 +90,18 @@ def get_ydl_opts(extra=None):
         "quiet":          True,
         "no_warnings":    True,
         "socket_timeout": 60,
-        "noplaylist":     True,
-        "ignoreerrors":   True,
+        "noplaylist":      True,
+        "ignoreerrors":   False,  # Ubah ke False agar jika error format terdeteksi di awal
         "source_address": "0.0.0.0",
         
-        # 🔥 FIX ENGINE: Fallback format berlapis anti-empty format dari YouTube
-        "format":         "bestaudio/best/worstvideo+bestaudio/bestvideo+bestaudio/worst",
+        # 🔥 ULTRA FIX: Minta format audio paling fleksibel untuk hindari "format not available"
+        "format":         "bestaudio/best",
         
         "keepvideo":      False,
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
         "extractor_args": {
             "youtube": {
-                # 🔥 FIX ENGINE: Menggunakan mobile & TV clients bypass restriksi server
                 "player_client": ["ios", "android", "tvhtml5"],
             }
         },
@@ -125,14 +127,14 @@ def search_and_get_info(query: str) -> dict:
         "quiet":          True,
         "no_warnings":    True,
         "skip_download":  True,
-        "noplaylist":     True,
+        "noplaylist":      True,
         "default_search": "ytsearch1",
         "ignoreerrors":   False,
         "socket_timeout": 60,
         "source_address": "0.0.0.0",
         
-        # Samakan strategi format pencarian dengan opsi download utama
-        "format":         "bestaudio/best/worstvideo+bestaudio/bestvideo+bestaudio/worst",
+        # Samakan strategi format pencarian 
+        "format":         "bestaudio/best",
         
         "proxy":          PROXY_URL,
         "noproxy":        "localhost,127.0.0.1",
@@ -303,8 +305,9 @@ async def main():
             await session.get(url)
     except: pass
 
-    bot   = TelegramClient("bot_session", API_ID, API_HASH)
-    user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH)
+    # Gunakan catch-up=False untuk menangani problem desinkronisasi timestamp saat restart
+    bot   = TelegramClient("bot_session", API_ID, API_HASH, catch_up=False)
+    user  = TelegramClient(StringSession(USER_SESSION), API_ID, API_HASH, catch_up=False)
     calls = PyTgCalls(user)
 
     register_handlers(bot)
@@ -329,10 +332,13 @@ async def main():
     print("✅ Bot siap! Menunggu request command...")
 
     while True:
-        try: await bot.run_until_disconnected()
+        try: 
+            await bot.run_until_disconnected()
         except Exception as e:
-            if "timestamp" in str(e).lower():
-                await asyncio.sleep(2)
+            err_msg = str(e).lower()
+            if "timestamp" in err_msg or "outdated" in err_msg:
+                print("⚠️ [TIMESTAMP WARNING] Menangkap error desinkronisasi, merefresh koneksi dalam 3 detik...")
+                await asyncio.sleep(3)
                 continue
             break
 
