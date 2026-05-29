@@ -34,7 +34,6 @@ if not USER_SESSION:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 🔥 BUMI HANGUSKAN COOKIES LAMA BIAR TIDAK MENGGANGGU OAUTH ENGINE!
 for f in glob.glob("*.session") + glob.glob("*.session-journal") + glob.glob("cookies*.txt"):
     try: os.remove(f)
     except: pass
@@ -45,8 +44,6 @@ calls = None
 queues: dict      = {}
 now_playing: dict = {}
 _play_locks: dict = {}
-
-PROXY_URL = ""
 
 def get_queue(chat_id):
     if chat_id not in queues: queues[chat_id] = []
@@ -80,19 +77,19 @@ def _init_js_runtime():
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
-        "quiet":          False,  # 🔥 WAJIB FALSE biar kode registrasi Google muncul di terminal!
+        "quiet":          False,  # 🔥 Tetap False biar log interaktif OAuth kelihatan!
         "no_warnings":    False,
         "socket_timeout": 60,
         "noplaylist":      True,
-        "ignoreerrors":   False, # Ubah ke False biar kalau crash langsung ketahuan error aslinya apa
-        "format":         "bestaudio/best", 
+        "ignoreerrors":   False,
+        "format":         "bestaudio/best",
         "keepvideo":      False,
     }
     
-    # 🔥 PURE OAUTH TV CLIENT ONLY (Menghindari block GVS PO Token iOS)
+    # 🔥 Memaksa otentikasi via TV client YouTube resmi
     opts["extractor_args"] = {
         "youtube": {
-            "player_client": ["tv", "web"],
+            "player_client": ["tv"],
             "oauth": True
         }
     }
@@ -105,40 +102,32 @@ def get_ydl_opts(extra=None):
         opts.update(extra)
     return opts
 
+# 🔥 FIX: bypass extractor pencarian info mentah langsung ke target download engine
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
     opts = get_ydl_opts({
-        "skip_download":  True,
+        "skip_download": True,
         "default_search": "ytsearch1"
     })
     
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(query, download=False)
-        if info is None: 
-            raise Exception("YouTube memberikan respon kosong.")
-        if "entries" in info:
-            entries = list(info["entries"])
-            if not entries or entries[0] is None: 
-                raise Exception("Lagu tidak ditemukan.")
-            info = entries[0]
-        url = info.get("webpage_url") or info.get("url", "")
-        return {"title": info.get("title", "Unknown"), "url": url, "duration": info.get("duration", 0), "uploader": info.get("uploader", "Unknown")}
-
-def _convert_to_opus(src: str, dest: str) -> str:
-    subprocess.run([
-        "ffmpeg", "-y", "-i", src, 
-        "-vn", "-acodec", "libopus", 
-        "-ar", "48000", "-ac", "2", 
-        "-b:a", "192k", dest
-    ], check=True, capture_output=True)
-    cleanup_file(src)
-    return dest
+        # Proses pencarian awal
+        info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+        if info and "entries" in info and len(info["entries"]) > 0:
+            entry = info["entries"][0]
+            return {
+                "title": entry.get("title", "Unknown Title"),
+                "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry['id']}",
+                "duration": entry.get("duration", 0)
+            }
+        raise Exception("Gagal mencari lagu atau butuh verifikasi OAuth di terminal.")
 
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     opus_path    = output_path + ".opus"
     cleanup_file(opus_path)
     
+    # 🔥 Di sini OAuth akan dipicu secara penuh oleh yt-dlp karena mulai proses download
     opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
     with yt_dlp.YoutubeDL(opts) as ydl: 
         ydl.download([url])
@@ -153,7 +142,17 @@ def download_audio(url: str, filename: str) -> str:
                 return opus_path
             return _convert_to_opus(fp, opus_path)
             
-    raise Exception("Gagal mengekstrak file audio audio dari YouTube.")
+    raise Exception("Gagal mengunduh file audio. Periksa otentikasi log container.")
+
+def _convert_to_opus(src: str, dest: str) -> str:
+    subprocess.run([
+        "ffmpeg", "-y", "-i", src, 
+        "-vn", "-acodec", "libopus", 
+        "-ar", "48000", "-ac", "2", 
+        "-b:a", "192k", dest
+    ], check=True, capture_output=True)
+    cleanup_file(src)
+    return dest
 
 async def play_next(chat_id: int):
     if chat_id not in _play_locks: _play_locks[chat_id] = asyncio.Lock()
@@ -173,7 +172,7 @@ async def play_next(chat_id: int):
         try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses file audio...*")
         except: pass
         try:
-            file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=120)
+            file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=180)
             
             await calls.play(
                 chat_id, 
@@ -189,7 +188,7 @@ async def play_next(chat_id: int):
                 except: pass
         except Exception as e:
             print(f"❌ Play error: {e}")
-            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}`. Lanjut ke antrian berikutnya...")
+            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}`. Pastikan sudah memasukkan kode OAuth di log terminal container.")
             asyncio.create_task(play_next(chat_id))
 
 def register_handlers(tg_bot):
@@ -207,7 +206,7 @@ def register_handlers(tg_bot):
         status  = await event.respond(f"🔍 Memproses request **{query}** via cloud engine...")
         try: info = await asyncio.wait_for(asyncio.to_thread(search_and_get_info, query), timeout=90)
         except Exception as e:
-            await status.edit(f"❌ Pencarian gagal: `{e}`")
+            await status.edit(f"❌ Pencarian gagal. Cek log container VPS untuk memasukkan kode verifikasi Google Device.")
             return
         get_queue(chat_id).append(info)
         buttons = [[Button.inline("⏭ Skip", data=f"skip_{chat_id}"), Button.inline("📋 Queue", data=f"queue_{chat_id}")]]
@@ -278,7 +277,7 @@ async def main():
     print("🚀 Inisialisasi container bot...")
     
     print("📦 [SYSTEM] Memaksa upgrade yt-dlp ke versi terbaru...")
-    up_proc = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "pyotp"], capture_output=True, text=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "pyotp"], capture_output=True, text=True)
     
     global yt_dlp
     import importlib
@@ -300,26 +299,22 @@ async def main():
     if TWO_FA_PASSWORD:
         credential = generate_otp_or_password(TWO_FA_PASSWORD)
         print("🔐 [2FA ENGINE] Membuka proteksi login session menggunakan password teks...")
-        try:
-            await user.start(password=lambda: credential)
+        try: await user.start(password=lambda: credential)
         except FloodWaitError as e:
-            print(f"⏳ [FLOODWAIT USERBOT] Telegram meminta tunggu {e.seconds} detik sebelum login userbot...")
+            print(f"⏳ [FLOODWAIT USERBOT] Telegram meminta tunggu {e.seconds} detik...")
             await asyncio.sleep(e.seconds)
             await user.start(password=lambda: credential)
     else:
-        try:
-            await user.start()
+        try: await user.start()
         except FloodWaitError as e:
-            print(f"⏳ [FLOODWAIT USERBOT] Telegram meminta tunggu {e.seconds} detik sebelum login userbot...")
+            print(f"⏳ [FLOODWAIT USERBOT] Telegram meminta tunggu {e.seconds} detik...")
             await asyncio.sleep(e.seconds)
             await user.start()
 
-    try:
-        await bot.start(bot_token=BOT_TOKEN)
+    try: await bot.start(bot_token=BOT_TOKEN)
     except FloodWaitError as e:
-        print(f"⏳ [FLOODWAIT BOT] Telegram membatasi login! Script otomatis tidur selama {e.seconds} detik...")
+        print(f"⏳ [FLOODWAIT BOT] Script otomatis tidur selama {e.seconds} detik...")
         await asyncio.sleep(e.seconds)
-        print("🚀 Bangun! Mencoba login kembali ke Telegram...")
         await bot.start(bot_token=BOT_TOKEN)
 
     await calls.start()
@@ -333,12 +328,10 @@ async def main():
     print("✅ Bot siap! Menunggu request command...")
 
     while True:
-        try: 
-            await bot.run_until_disconnected()
+        try: await bot.run_until_disconnected()
         except Exception as e:
             err_msg = str(e).lower()
             if "timestamp" in err_msg or "outdated" in err_msg:
-                print("⚠️ [TIMESTAMP WARNING] Menangkap error desinkronisasi, merefresh koneksi dalam 3 detik...")
                 await asyncio.sleep(3)
                 continue
             break
