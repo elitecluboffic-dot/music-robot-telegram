@@ -34,12 +34,11 @@ if not USER_SESSION:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 🔥 FIX UTAMA 1: Bersihkan file sesi saja, jangan hapus file cookies utama kamu saat start
+# Bersihkan file sesi sampah, JANGAN hapus cookies utama
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     try: os.remove(f)
     except: pass
 
-# Bersihkan file cookie temp sisa download lama jika ada, tanpa mengganggu cookies utama
 for f in glob.glob("cookies_temp_*.txt"):
     try: os.remove(f)
     except: pass
@@ -80,16 +79,17 @@ def _init_js_runtime():
                     break
             except: pass
 
-# 🔥 FIX UTAMA 2: Fallback Engine Cerdas untuk deteksi cookies utama & backup secara berurutan
+# 🔥 FIX ENGINE TOTAL: Mengunci client ke lini mobile agar tidak memicu JS Challenge desktop
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
         "quiet":          False,  
         "no_warnings":    False,
-        "socket_timeout": 60,
+        "socket_timeout": 30,
         "noplaylist":      True,
         "ignoreerrors":   False,
-        "format":          "bestaudio/best",
+        # Mengambil audio terbaik, jika disembunyikan, ambil video paling ringan sebagai fallback
+        "format":          "bestaudio/251/250/249/worstvideo[ext=mp4]+bestaudio/best",
         "keepvideo":      False,
     }
     
@@ -107,11 +107,12 @@ def get_ydl_opts(extra=None):
     else:
         print("⚠️ [COOKIE WARNING] Tidak ada satupun file cookies (.txt) yang ditemukan!")
     
+    # Memaksa yt-dlp menggunakan mweb/ios bypasser dan mematikan fungsi remote yang sering diblokir Railway
     opts["extractor_args"] = {
         "youtube": {
-            "player_client": ["android", "web"],
-            "oauth": False,  # Di-set ke False agar tidak tabrakan dengan metode verifikasi cookies
-            "remote_components": "ejs:github"
+            "player_client": ["ios", "mweb", "android_music"],
+            "oauth": False,
+            "skip": ["webpage", "player"],
         }
     }
     
@@ -125,7 +126,6 @@ def get_ydl_opts(extra=None):
 
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
-    
     query = query.strip()
     is_link = "youtube.com/" in query or "youtu.be/" in query
     
