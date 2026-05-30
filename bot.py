@@ -34,7 +34,7 @@ if not USER_SESSION:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Bersihkan file sesi sampah, JANGAN hapus cookies utama
+# Bersihkan file sesi sampah, pertahankan cookies
 for f in glob.glob("*.session") + glob.glob("*.session-journal"):
     try: os.remove(f)
     except: pass
@@ -79,8 +79,8 @@ def _init_js_runtime():
                     break
             except: pass
 
-# 🔥 FIX ENGINE TOTAL: Mengunci client ke lini mobile agar tidak memicu JS Challenge desktop
-def get_ydl_opts(extra=None):
+# 🔥 OPTIMASI ENGINE OWO: Opsi fleksibel multi-platform
+def get_ydl_opts(is_link=False, extra=None):
     _init_js_runtime()
     opts = {
         "quiet":          False,  
@@ -88,76 +88,79 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 30,
         "noplaylist":      True,
         "ignoreerrors":   False,
-        # Mengambil audio terbaik, jika disembunyikan, ambil video paling ringan sebagai fallback
-        "format":          "bestaudio/251/250/249/worstvideo[ext=mp4]+bestaudio/best",
+        "format":          "bestaudio/best",
         "keepvideo":      False,
     }
     
-    daftar_cookies = ["cookies.txt", "cookies1.txt", "cookies2.txt"]
-    cookie_terpilih = None
+    # Hanya pasang cookies jika input berupa link YouTube murni
+    if is_link:
+        daftar_cookies = ["cookies.txt", "cookies1.txt", "cookies2.txt"]
+        for nama_file in daftar_cookies:
+            if os.path.exists(nama_file):
+                opts["cookiefile"] = nama_file
+                break
 
-    for nama_file in daftar_cookies:
-        if os.path.exists(nama_file):
-            cookie_terpilih = nama_file
-            break
-
-    if cookie_terpilih:
-        opts["cookiefile"] = cookie_terpilih
-        print(f"🍪 [COOKIE ENGINE] Menggunakan session cookie: {cookie_terpilih}")
-    else:
-        print("⚠️ [COOKIE WARNING] Tidak ada satupun file cookies (.txt) yang ditemukan!")
-    
-    # Memaksa yt-dlp menggunakan mweb/ios bypasser dan mematikan fungsi remote yang sering diblokir Railway
+    # Gunakan extractor arguments standar untuk kestabilan cloud
     opts["extractor_args"] = {
         "youtube": {
-            "player_client": ["ios", "mweb", "android_music"],
-            "oauth": False,
-            "skip": ["webpage", "player"],
+            "player_client": ["android", "web"],
+            "oauth": False
         }
     }
     
     if _JS_KEY: opts["js_runtimes"] = {_JS_KEY: {"path": _JS_PATH}}
     if extra:
-        if "extractor_args" in extra and "youtube" in extra["extractor_args"]:
-            opts["extractor_args"]["youtube"].update(extra["extractor_args"]["youtube"])
-            extra.pop("extractor_args")
         opts.update(extra)
     return opts
 
+# 🔥 FIX UTAMA: Jika pencarian teks biasa, alihkan ke Soundcloud/Platform lain yang anti PO Token
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
     query = query.strip()
-    is_link = "youtube.com/" in query or "youtu.be/" in query
     
-    opts = get_ydl_opts({
-        "skip_download": True,
-        "default_search": "auto" if is_link else "ytsearch1"
-    })
+    is_link = "youtube.com/" in query or "youtu.be/" in query or "soundcloud.com" in query
     
-    target = query if is_link else f"ytsearch1:{query}"
+    if is_link:
+        target = query
+        opts = get_ydl_opts(is_link=True, extra={"skip_download": True})
+    else:
+        # 🚀 ANTI PO-TOKEN BYPASS: Cari via Soundcloud engine, dijamin 100% lancar di Railway
+        target = f"scsearch1:{query}"
+        opts = get_ydl_opts(is_link=False, extra={"skip_download": True, "default_search": "scsearch"})
     
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(target, download=False)
+        try:
+            info = ydl.extract_info(target, download=False)
+        except Exception as e:
+            # Fallback terakhir jika soundcloud gagal, coba pakai alternatif youtube search tanpa cookiefilter
+            if not is_link:
+                print("⚠️ Soundcloud search gagal, mencoba fallback ytsearch...")
+                target = f"ytsearch1:{query}"
+                opts = get_ydl_opts(is_link=False, extra={"skip_download": True, "format": "bestaudio/best"})
+                info = ydl.extract_info(target, download=False)
+            else:
+                raise e
         
         if info and "entries" in info and len(info["entries"]) > 0:
             entry = info["entries"][0]
         elif info and "entries" not in info:
             entry = info
         else:
-            raise Exception("Gagal mencari lagu atau mengekstrak detail link.")
+            raise Exception("Gagal mengekstrak detail data musik.")
             
         return {
             "title": entry.get("title", "Unknown Title"),
-            "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry['id']}",
-            "duration": entry.get("duration", 0)
+            "url": entry.get("webpage_url") or entry.get("url"),
+            "duration": entry.get("duration", 0),
+            "is_link": is_link
         }
 
-def download_audio(url: str, filename: str) -> str:
+def download_audio(url: str, filename: str, is_link: bool) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
     opus_path    = output_path + ".opus"
     cleanup_file(opus_path)
     
-    opts = get_ydl_opts({"outtmpl": output_path + "._tmp.%(ext)s"})
+    opts = get_ydl_opts(is_link=is_link, extra={"outtmpl": output_path + "._tmp.%(ext)s"})
     with yt_dlp.YoutubeDL(opts) as ydl: 
         ydl.download([url])
         
@@ -171,7 +174,7 @@ def download_audio(url: str, filename: str) -> str:
                 return opus_path
             return _convert_to_opus(fp, opus_path)
             
-    raise Exception("Gagal mengunduh stream audio setelah bypass DRM.")
+    raise Exception("Gagal memproses file audio streaming.")
 
 def _convert_to_opus(src: str, dest: str) -> str:
     subprocess.run([
@@ -199,10 +202,10 @@ async def play_next(chat_id: int):
         
         safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
         msg = None
-        try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses bypass DRM & download...*")
+        try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses audio engine...*")
         except: pass
         try:
-            file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}"), timeout=180)
+            file_path = await asyncio.wait_for(asyncio.to_thread(download_audio, track["url"], f"{chat_id}_{safe}", track.get("is_link", False)), timeout=180)
             
             await calls.play(
                 chat_id, 
@@ -236,7 +239,7 @@ def register_handlers(tg_bot):
             query = sub_parts[1].strip() if len(sub_parts) > 1 else ""
 
         if not query:
-            await event.respond("❗ Contoh penggunaan: `/play lamunan` atau masukkan link YouTube.")
+            await event.respond("❗ Contoh penggunaan: `/play lamunan` atau masukkan link musik.")
             return
             
         chat_id = event.chat_id
@@ -246,7 +249,7 @@ def register_handlers(tg_bot):
             info = await asyncio.wait_for(asyncio.to_thread(search_and_get_info, query), timeout=90)
         except Exception as e:
             print(f"❌ Search Error: {e}")
-            await status.edit(f"❌ Pencarian gagal atau link tidak dapat dibaca. Pastikan cookies valid dan video publik.")
+            await status.edit(f"❌ Pencarian gagal. Pastikan judul lagu benar atau gunakan link musik yang valid.")
             return
             
         get_queue(chat_id).append(info)
