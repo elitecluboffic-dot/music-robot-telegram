@@ -34,6 +34,7 @@ if not USER_SESSION:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# Bersihkan file sesi sampah dan temp cookies saat start biar ga tabrakan session
 for f in glob.glob("*.session") + glob.glob("*.session-journal") + glob.glob("cookies*.txt"):
     try: os.remove(f)
     except: pass
@@ -86,7 +87,6 @@ def get_ydl_opts(extra=None):
         "keepvideo":      False,
     }
     
-    # 🔥 PENTING: Pindah dari client 'tv' (yang kena DRM) ke 'android' dan 'web' + aktifkan remote component solver!
     opts["extractor_args"] = {
         "youtube": {
             "player_client": ["android", "web"],
@@ -103,23 +103,37 @@ def get_ydl_opts(extra=None):
         opts.update(extra)
     return opts
 
+# 🔥 UPDATE UTAMA 1: Pengecekan Link Cerdas Anti Karakter Rusak
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
+    
+    query = query.strip()
+    # Cek apakah inputan user sudah berupa link YouTube murni / shortener
+    is_link = "youtube.com/" in query or "youtu.be/" in query
+    
     opts = get_ydl_opts({
         "skip_download": True,
-        "default_search": "ytsearch1"
+        "default_search": "auto" if is_link else "ytsearch1"
     })
     
+    # Jika link murni, berikan langsung ke yt-dlp tanpa dibungkus ytsearch1
+    target = query if is_link else f"ytsearch1:{query}"
+    
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+        info = ydl.extract_info(target, download=False)
+        
         if info and "entries" in info and len(info["entries"]) > 0:
             entry = info["entries"][0]
-            return {
-                "title": entry.get("title", "Unknown Title"),
-                "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry['id']}",
-                "duration": entry.get("duration", 0)
-            }
-        raise Exception("Gagal mencari lagu. Cek log OAuth.")
+        elif info and "entries" not in info:
+            entry = info
+        else:
+            raise Exception("Gagal mencari lagu atau mengekstrak detail link.")
+            
+        return {
+            "title": entry.get("title", "Unknown Title"),
+            "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry['id']}",
+            "duration": entry.get("duration", 0)
+        }
 
 def download_audio(url: str, filename: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, filename)
@@ -165,6 +179,8 @@ async def play_next(chat_id: int):
             return
         track = queue.pop(0)
         now_playing[chat_id] = track
+        
+        # Amankan penamaan file lokal dari karakter aneh bawaan judul video luar
         safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
         msg = None
         try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses bypass DRM & download...*")
@@ -186,30 +202,45 @@ async def play_next(chat_id: int):
                 except: pass
         except Exception as e:
             print(f"❌ Play error: {e}")
-            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}`. Periksa otentikasi OAuth baru di log terminal.")
+            await bot.send_message(chat_id, f"❌ Gagal memutar `{track['title']}`. Mencoba beralih ke lagu berikutnya...")
             asyncio.create_task(play_next(chat_id))
 
 def register_handlers(tg_bot):
     @tg_bot.on(events.NewMessage(pattern=r"^/start"))
-    async def cmd_start(event): await event.respond("🎵 **Music Bot Cloud-Direct Ready**\n\n▶️ `/play <lagu>`\n⏭ `/skip`\n📋 `/queue`\n⏹ `/stop`")
+    async def cmd_start(event): 
+        await event.respond("🎵 **Music Bot Cloud-Direct Ready**\n\n▶️ `/play <lagu / link>`\n⏭ `/skip`\n📋 `/queue`\n⏹ `/stop`")
 
-    @tg_bot.on(events.NewMessage(pattern=r"^/play(?:@\w+)?(?:\s+(.+))?$", func=lambda e: e.is_group))
+    # 🔥 UPDATE UTAMA 2: Handler Bebas Regex Karakter Tanpa Batasan Batas String
+    @tg_bot.on(events.NewMessage(func=lambda e: e.is_group and e.text and e.text.startswith("/play")))
     async def cmd_play(event):
-        query = event.pattern_match.group(1)
-        if query: query = query.strip()
+        # Memotong teks murni setelah perintah /play
+        parts = event.text.split(None, 1)
+        query = parts[1].strip() if len(parts) > 1 else ""
+        
+        # Tangani jika bot di-tag di grup, misal /play@username_bot lagu
+        if query.startswith("@"):
+            sub_parts = query.split(None, 1)
+            query = sub_parts[1].strip() if len(sub_parts) > 1 else ""
+
         if not query:
-            await event.respond("❗ Contoh penggunaan: `/play lamunan`")
+            await event.respond("❗ Contoh penggunaan: `/play lamunan` atau masukkan link YouTube.")
             return
+            
         chat_id = event.chat_id
-        status  = await event.respond(f"🔍 Memproses request **{query}** via cloud engine...")
-        try: info = await asyncio.wait_for(asyncio.to_thread(search_and_get_info, query), timeout=90)
+        status  = await event.respond(f"🔍 Memproses request via cloud engine...")
+        
+        try: 
+            info = await asyncio.wait_for(asyncio.to_thread(search_and_get_info, query), timeout=90)
         except Exception as e:
-            await status.edit(f"❌ Pencarian gagal. Cek log container untuk memasukkan kode Google Device.")
+            print(f"❌ Search Error: {e}")
+            await status.edit(f"❌ Pencarian gagal atau link tidak dapat dibaca. Pastikan link video publik.")
             return
+            
         get_queue(chat_id).append(info)
         buttons = [[Button.inline("⏭ Skip", data=f"skip_{chat_id}"), Button.inline("📋 Queue", data=f"queue_{chat_id}")]]
         await status.edit(f"✅ **Ditambahkan ke antrian!**\n\n🎵 **{info['title']}**\n⏱ {fmt_duration(info['duration'])}", buttons=buttons)
-        if chat_id not in now_playing: asyncio.create_task(play_next(chat_id))
+        if chat_id not in now_playing: 
+            asyncio.create_task(play_next(chat_id))
 
     @tg_bot.on(events.NewMessage(pattern=r"^/skip(?:@\w+)?$", func=lambda e: e.is_group))
     async def cmd_skip(event):
@@ -257,7 +288,6 @@ async def on_stream_end_handler(client, update):
     if isinstance(update, StreamEnded):
         cleanup_file(now_playing.pop(update.chat_id, {}).get("file_path"))
         asyncio.create_task(play_next(update.chat_id))
-
 
 def generate_otp_or_password(secret: str) -> str:
     if not secret: return ""
