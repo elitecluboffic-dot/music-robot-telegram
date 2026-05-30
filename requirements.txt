@@ -1,19 +1,1 @@
-# Library Utama Telegram Client
-telethon
-TgCrypto
 
-# Library Voice Calls (Dioptimalkan untuk Cloud Deployment)
-pytgcalls
-
-# Library Download & Stream (Selalu ambil versi paling segar untuk bypass YouTube)
-yt-dlp
-
-# Library Pendukung & HTTP Server
-python-dotenv
-aiohttp
-
-# Library untuk Hit API Proxy Geonode & GitHub Fallback
-requests
-
-# Library Generator OTP & Keamanan Verifikasi Dua Langkah
-pyotp
