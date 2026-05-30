@@ -34,8 +34,13 @@ if not USER_SESSION:
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Bersihkan file sesi sampah dan temp cookies saat start biar ga tabrakan session
-for f in glob.glob("*.session") + glob.glob("*.session-journal") + glob.glob("cookies*.txt"):
+# 🔥 FIX UTAMA 1: Bersihkan file sesi saja, jangan hapus file cookies utama kamu saat start
+for f in glob.glob("*.session") + glob.glob("*.session-journal"):
+    try: os.remove(f)
+    except: pass
+
+# Bersihkan file cookie temp sisa download lama jika ada, tanpa mengganggu cookies utama
+for f in glob.glob("cookies_temp_*.txt"):
     try: os.remove(f)
     except: pass
 
@@ -75,6 +80,7 @@ def _init_js_runtime():
                     break
             except: pass
 
+# 🔥 FIX UTAMA 2: Fallback Engine Cerdas untuk deteksi cookies utama & backup secara berurutan
 def get_ydl_opts(extra=None):
     _init_js_runtime()
     opts = {
@@ -83,14 +89,28 @@ def get_ydl_opts(extra=None):
         "socket_timeout": 60,
         "noplaylist":      True,
         "ignoreerrors":   False,
-        "format":         "bestaudio/best",
+        "format":          "bestaudio/best",
         "keepvideo":      False,
     }
+    
+    daftar_cookies = ["cookies.txt", "cookies1.txt", "cookies2.txt"]
+    cookie_terpilih = None
+
+    for nama_file in daftar_cookies:
+        if os.path.exists(nama_file):
+            cookie_terpilih = nama_file
+            break
+
+    if cookie_terpilih:
+        opts["cookiefile"] = cookie_terpilih
+        print(f"🍪 [COOKIE ENGINE] Menggunakan session cookie: {cookie_terpilih}")
+    else:
+        print("⚠️ [COOKIE WARNING] Tidak ada satupun file cookies (.txt) yang ditemukan!")
     
     opts["extractor_args"] = {
         "youtube": {
             "player_client": ["android", "web"],
-            "oauth": True,
+            "oauth": False,  # Di-set ke False agar tidak tabrakan dengan metode verifikasi cookies
             "remote_components": "ejs:github"
         }
     }
@@ -103,12 +123,10 @@ def get_ydl_opts(extra=None):
         opts.update(extra)
     return opts
 
-# 🔥 UPDATE UTAMA 1: Pengecekan Link Cerdas Anti Karakter Rusak
 def search_and_get_info(query: str) -> dict:
     _init_js_runtime()
     
     query = query.strip()
-    # Cek apakah inputan user sudah berupa link YouTube murni / shortener
     is_link = "youtube.com/" in query or "youtu.be/" in query
     
     opts = get_ydl_opts({
@@ -116,7 +134,6 @@ def search_and_get_info(query: str) -> dict:
         "default_search": "auto" if is_link else "ytsearch1"
     })
     
-    # Jika link murni, berikan langsung ke yt-dlp tanpa dibungkus ytsearch1
     target = query if is_link else f"ytsearch1:{query}"
     
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -180,7 +197,6 @@ async def play_next(chat_id: int):
         track = queue.pop(0)
         now_playing[chat_id] = track
         
-        # Amankan penamaan file lokal dari karakter aneh bawaan judul video luar
         safe = "".join(c for c in track["title"][:30] if c.isalnum() or c in " _-").replace(" ", "_")
         msg = None
         try: msg = await bot.send_message(chat_id, f"▶️ **Now Playing**\n\n🎵 **{track['title']}**\n⏱ {fmt_duration(track['duration'])}\n⏳ *Sedang memproses bypass DRM & download...*")
@@ -210,14 +226,11 @@ def register_handlers(tg_bot):
     async def cmd_start(event): 
         await event.respond("🎵 **Music Bot Cloud-Direct Ready**\n\n▶️ `/play <lagu / link>`\n⏭ `/skip`\n📋 `/queue`\n⏹ `/stop`")
 
-    # 🔥 UPDATE UTAMA 2: Handler Bebas Regex Karakter Tanpa Batasan Batas String
     @tg_bot.on(events.NewMessage(func=lambda e: e.is_group and e.text and e.text.startswith("/play")))
     async def cmd_play(event):
-        # Memotong teks murni setelah perintah /play
         parts = event.text.split(None, 1)
         query = parts[1].strip() if len(parts) > 1 else ""
         
-        # Tangani jika bot di-tag di grup, misal /play@username_bot lagu
         if query.startswith("@"):
             sub_parts = query.split(None, 1)
             query = sub_parts[1].strip() if len(sub_parts) > 1 else ""
@@ -233,7 +246,7 @@ def register_handlers(tg_bot):
             info = await asyncio.wait_for(asyncio.to_thread(search_and_get_info, query), timeout=90)
         except Exception as e:
             print(f"❌ Search Error: {e}")
-            await status.edit(f"❌ Pencarian gagal atau link tidak dapat dibaca. Pastikan link video publik.")
+            await status.edit(f"❌ Pencarian gagal atau link tidak dapat dibaca. Pastikan cookies valid dan video publik.")
             return
             
         get_queue(chat_id).append(info)
